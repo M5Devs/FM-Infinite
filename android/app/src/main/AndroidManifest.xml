@@ -42,7 +42,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
         <activity
             android:name=".EmulatorActivity"
             android:screenOrientation="portrait"
-            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
+            android:configChanges="orientation|screenSize|keyboardHidden" />
         <activity
             android:name=".SettingsActivity"
             android:screenOrientation="portrait"

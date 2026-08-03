@@ -181,13 +181,18 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
     std::lock_guard<std::mutex> lock(g_vm_mutex);
     LOGI("nativeInit called");
 
+    if (romDir == nullptr) {
+        LOGE("nativeInit: romDir is null!");
+        return JNI_FALSE;
+    }
+
     if (g_towns != nullptr) {
         LOGI("Emulator already initialized. Reusing instance.");
         return JNI_TRUE;
     }
 
     const char *c_rom_dir = env->GetStringUTFChars(romDir, nullptr);
-    const char *c_shared_dir = env->GetStringUTFChars(sharedDir, nullptr);
+    const char *c_shared_dir = sharedDir ? env->GetStringUTFChars(sharedDir, nullptr) : nullptr;
 
     g_rom_dir = c_rom_dir;
 
@@ -211,7 +216,9 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
     bool setupResult = FMTownsCommon::Setup(*g_towns, g_outside_world, g_window, params);
 
     env->ReleaseStringUTFChars(romDir, c_rom_dir);
-    env->ReleaseStringUTFChars(sharedDir, c_shared_dir);
+    if (sharedDir && c_shared_dir) {
+        env->ReleaseStringUTFChars(sharedDir, c_shared_dir);
+    }
 
     if (!setupResult) {
         LOGE("Failed to set up FMTownsCommon core!");
@@ -239,7 +246,12 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadROM(JNIEnv *env, jobject thiz, 
     LOGI("nativeLoadROM called");
 
     if (g_towns == nullptr) {
-        LOGE("Core not initialized!");
+        LOGE("nativeLoadROM: Core not initialized!");
+        return JNI_FALSE;
+    }
+
+    if (romPath == nullptr) {
+        LOGE("nativeLoadROM: romPath is null!");
         return JNI_FALSE;
     }
 
@@ -257,7 +269,12 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadDisc(JNIEnv *env, jobject thiz,
     LOGI("nativeLoadDisc called");
 
     if (g_towns == nullptr) {
-        LOGE("Core not initialized!");
+        LOGE("nativeLoadDisc: Core not initialized!");
+        return JNI_FALSE;
+    }
+
+    if (discPath == nullptr) {
+        LOGE("nativeLoadDisc: discPath is null!");
         return JNI_FALSE;
     }
 
@@ -292,7 +309,9 @@ JNIEXPORT void JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeRunFrame(JNIEnv *env, jobject thiz)
 {
     std::lock_guard<std::mutex> lock(g_vm_mutex);
-    if (g_towns == nullptr) return;
+    if (g_towns == nullptr) {
+        return;
+    }
 
     // Run for roughly 1/60th of a second worth of Towns time (16666667 nanoseconds)
     long long nanosecondsToRun = 16666667LL;
@@ -343,7 +362,19 @@ JNIEXPORT jboolean JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeGetFrameBuffer(JNIEnv *env, jobject thiz, jintArray outPixels, jintArray outSize)
 {
     std::lock_guard<std::mutex> lock(g_vm_mutex);
-    if (g_window == nullptr) return JNI_FALSE;
+    if (g_window == nullptr) {
+        return JNI_FALSE;
+    }
+
+    if (outPixels == nullptr) {
+        LOGE("nativeGetFrameBuffer: outPixels is null!");
+        return JNI_FALSE;
+    }
+
+    if (outSize == nullptr) {
+        LOGE("nativeGetFrameBuffer: outSize is null!");
+        return JNI_FALSE;
+    }
 
     TownsRender::ImageCopy img = g_window->GetLatestImage();
     if (img.wid == 0 || img.hei == 0 || img.rgba.empty()) {
@@ -445,7 +476,15 @@ JNIEXPORT jboolean JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeSaveState(JNIEnv *env, jobject thiz, jstring statePath)
 {
     std::lock_guard<std::mutex> lock(g_vm_mutex);
-    if (g_towns == nullptr) return JNI_FALSE;
+    if (g_towns == nullptr) {
+        LOGE("nativeSaveState: Core is not initialized!");
+        return JNI_FALSE;
+    }
+
+    if (statePath == nullptr) {
+        LOGE("nativeSaveState: statePath is null!");
+        return JNI_FALSE;
+    }
 
     const char *c_state_path = env->GetStringUTFChars(statePath, nullptr);
     std::string path_str(c_state_path);
@@ -459,7 +498,15 @@ JNIEXPORT jboolean JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadState(JNIEnv *env, jobject thiz, jstring statePath)
 {
     std::lock_guard<std::mutex> lock(g_vm_mutex);
-    if (g_towns == nullptr) return JNI_FALSE;
+    if (g_towns == nullptr) {
+        LOGE("nativeLoadState: Core is not initialized!");
+        return JNI_FALSE;
+    }
+
+    if (statePath == nullptr) {
+        LOGE("nativeLoadState: statePath is null!");
+        return JNI_FALSE;
+    }
 
     const char *c_state_path = env->GetStringUTFChars(statePath, nullptr);
     std::string path_str(c_state_path);

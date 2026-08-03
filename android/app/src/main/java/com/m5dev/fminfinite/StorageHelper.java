@@ -85,12 +85,36 @@ public class StorageHelper {
             return;
         }
 
-        // Auto-create subfolders in the tree
-        createSubfolderIfMissing(rootDir, SUBFOLDER_BIOS);
-        createSubfolderIfMissing(rootDir, SUBFOLDER_ROMS);
-        createSubfolderIfMissing(rootDir, SUBFOLDER_SAVES);
-        createSubfolderIfMissing(rootDir, SUBFOLDER_STATES);
-        createSubfolderIfMissing(rootDir, SUBFOLDER_COVERS);
+        // Auto-create subfolders in the tree directly using fromTreeUri and createDirectory
+        DocumentFile biosDoc = rootDir.findFile(SUBFOLDER_BIOS);
+        if (biosDoc == null || !biosDoc.isDirectory()) {
+            rootDir.createDirectory(SUBFOLDER_BIOS);
+            Log.i(TAG, "Created SAF subfolder: " + SUBFOLDER_BIOS);
+        }
+
+        DocumentFile romsDoc = rootDir.findFile(SUBFOLDER_ROMS);
+        if (romsDoc == null || !romsDoc.isDirectory()) {
+            rootDir.createDirectory(SUBFOLDER_ROMS);
+            Log.i(TAG, "Created SAF subfolder: " + SUBFOLDER_ROMS);
+        }
+
+        DocumentFile savesDoc = rootDir.findFile(SUBFOLDER_SAVES);
+        if (savesDoc == null || !savesDoc.isDirectory()) {
+            rootDir.createDirectory(SUBFOLDER_SAVES);
+            Log.i(TAG, "Created SAF subfolder: " + SUBFOLDER_SAVES);
+        }
+
+        DocumentFile statesDoc = rootDir.findFile(SUBFOLDER_STATES);
+        if (statesDoc == null || !statesDoc.isDirectory()) {
+            rootDir.createDirectory(SUBFOLDER_STATES);
+            Log.i(TAG, "Created SAF subfolder: " + SUBFOLDER_STATES);
+        }
+
+        DocumentFile coversDoc = rootDir.findFile(SUBFOLDER_COVERS);
+        if (coversDoc == null || !coversDoc.isDirectory()) {
+            rootDir.createDirectory(SUBFOLDER_COVERS);
+            Log.i(TAG, "Created SAF subfolder: " + SUBFOLDER_COVERS);
+        }
 
         // Synchronize files from DocumentTree to local app private storage for C++ core usage
         File localRoot = context.getExternalFilesDir(null);
@@ -104,14 +128,6 @@ public class StorageHelper {
         syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_SAVES);
         syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_STATES);
         syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_COVERS);
-    }
-
-    private static void createSubfolderIfMissing(DocumentFile root, String name) {
-        DocumentFile sub = root.findFile(name);
-        if (sub == null || !sub.isDirectory()) {
-            root.createDirectory(name);
-            Log.i(TAG, "Created SAF subfolder: " + name);
-        }
     }
 
     private static void syncDocToLocal(Context context, DocumentFile rootDoc, File localParent, String folderName) {
@@ -153,7 +169,7 @@ public class StorageHelper {
         if (rootUri == null) return;
 
         DocumentFile rootDoc = DocumentFile.fromTreeUri(context, rootUri);
-        if (rootDoc == null) return;
+        if (rootDoc == null || !rootDoc.exists()) return;
 
         File localRoot = context.getExternalFilesDir(null);
         if (localRoot == null) {
@@ -161,8 +177,18 @@ public class StorageHelper {
         }
 
         // Push local saves & states back to SAF so they persist across uninstall/cleanups
-        syncLocalToDoc(context, new File(localRoot, SUBFOLDER_SAVES), rootDoc.findFile(SUBFOLDER_SAVES));
-        syncLocalToDoc(context, new File(localRoot, SUBFOLDER_STATES), rootDoc.findFile(SUBFOLDER_STATES));
+        DocumentFile savesDoc = rootDoc.findFile(SUBFOLDER_SAVES);
+        if (savesDoc == null || !savesDoc.isDirectory()) {
+            savesDoc = rootDoc.createDirectory(SUBFOLDER_SAVES);
+        }
+
+        DocumentFile statesDoc = rootDoc.findFile(SUBFOLDER_STATES);
+        if (statesDoc == null || !statesDoc.isDirectory()) {
+            statesDoc = rootDoc.createDirectory(SUBFOLDER_STATES);
+        }
+
+        syncLocalToDoc(context, new File(localRoot, SUBFOLDER_SAVES), savesDoc);
+        syncLocalToDoc(context, new File(localRoot, SUBFOLDER_STATES), statesDoc);
     }
 
     private static void syncLocalToDoc(Context context, File localDir, DocumentFile destDocDir) {
