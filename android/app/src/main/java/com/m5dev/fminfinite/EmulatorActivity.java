@@ -35,7 +35,6 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
-import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.RelativeLayout;
@@ -58,10 +57,12 @@ public class EmulatorActivity extends AppCompatActivity {
     private EmulatorSurfaceView surfaceView;
     private FrameLayout rootLayout;
 
-    // Top bar
-    private LinearLayout topStatusBar;
+    // Status Bar above controls
+    private LinearLayout statusMenuBar;
     private TextView gameNameText;
     private TextView fpsCounterText;
+    private TextView kbToggleBtn;
+    private TextView menuOpenBtn;
 
     // Controls & Overlays
     private FrameLayout controlsArea;
@@ -74,7 +75,9 @@ public class EmulatorActivity extends AppCompatActivity {
     private int currentGamepadMask = 0;
     private long fpsLastTime = 0;
     private int fpsFrameCount = 0;
-    private boolean isKeyboardOpen = false;
+
+    // Keyboard State (0 = hidden, 1 = Basic, 2 = Full)
+    private int keyboardState = 0;
     private boolean isMenuOpen = false;
 
     // SharedPreferences settings
@@ -99,7 +102,7 @@ public class EmulatorActivity extends AppCompatActivity {
         // Load Settings
         loadSettings();
 
-        // Root Layout (Vertical)
+        // Root Layout (FrameLayout for overlaying Quick Menu)
         rootLayout = new FrameLayout(this);
         rootLayout.setBackgroundColor(Color.parseColor("#0D0D0F"));
         rootLayout.setFitsSystemWindows(true);
@@ -115,14 +118,8 @@ public class EmulatorActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
 
-        // 1. TOP Status Bar (Game name + FPS)
-        setupTopStatusBar();
-        mainVerticalLayout.addView(topStatusBar);
-
-        // 2. MIDDLE Emulator Surface View (4:3 lock scaled)
+        // 1. TOP Emulator Surface View (4:3 lock scaled centered in weight-based container)
         setupSurfaceView();
-
-        // Wrap surface in a weight-based container so it takes maximum remaining vertical space
         FrameLayout surfaceWrapper = new FrameLayout(this);
         LinearLayout.LayoutParams wrapperParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f
@@ -132,19 +129,27 @@ public class EmulatorActivity extends AppCompatActivity {
         surfaceWrapper.addView(surfaceView);
         mainVerticalLayout.addView(surfaceWrapper);
 
-        // 3. BOTTOM Controls Area (Portrait)
+        // 2. MIDDLE Keyboard Overlay (slides/appears ABOVE gamepad area, fits between wrapper and status bar)
+        setupSoftKeyboardContainer();
+        mainVerticalLayout.addView(keyboardContainer);
+
+        // 3. MIDDLE Status Bar above controls (⌨️ on left, ☰ on right, name/FPS in center)
+        setupStatusMenuBar();
+        mainVerticalLayout.addView(statusMenuBar);
+
+        // 4. BOTTOM Virtual Gamepad (Portrait, standard 240dp height)
         setupControlsArea();
         mainVerticalLayout.addView(controlsArea);
 
         rootLayout.addView(mainVerticalLayout);
 
-        // 4. Quick Menu Overlay (Initially GONE)
+        // 5. Quick Menu Overlay (Initially GONE)
         setupQuickMenuOverlay();
         rootLayout.addView(quickMenuOverlay);
 
         setContentView(rootLayout);
 
-        // Start Core
+        // Initialize core and start emulation loop
         initCoreAndLoad();
     }
 
@@ -156,43 +161,75 @@ public class EmulatorActivity extends AppCompatActivity {
         virtualPadSize = prefs.getString("virtual_pad_size", "medium");
     }
 
-    private void setupTopStatusBar() {
-        topStatusBar = new LinearLayout(this);
-        topStatusBar.setOrientation(LinearLayout.HORIZONTAL);
-        topStatusBar.setBackgroundColor(Color.parseColor("#111318"));
-        topStatusBar.setPadding(dpToPx(16), dpToPx(6), dpToPx(16), dpToPx(6));
-        topStatusBar.setGravity(Gravity.CENTER_VERTICAL);
-        topStatusBar.setLayoutParams(new LinearLayout.LayoutParams(
+    private void setupStatusMenuBar() {
+        statusMenuBar = new LinearLayout(this);
+        statusMenuBar.setOrientation(LinearLayout.HORIZONTAL);
+        statusMenuBar.setBackgroundColor(Color.parseColor("#111318"));
+        statusMenuBar.setGravity(Gravity.CENTER_VERTICAL);
+        statusMenuBar.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dpToPx(36)
+                dpToPx(48) // 48dp high for comfortable touch targets
         ));
+
+        // Left ⌨️ button
+        kbToggleBtn = new TextView(this);
+        kbToggleBtn.setText("⌨️");
+        kbToggleBtn.setGravity(Gravity.CENTER);
+        kbToggleBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        kbToggleBtn.setPadding(dpToPx(16), 0, dpToPx(16), 0);
+        LinearLayout.LayoutParams kbParams = new LinearLayout.LayoutParams(
+                dpToPx(56), ViewGroup.LayoutParams.MATCH_PARENT
+        );
+        kbToggleBtn.setLayoutParams(kbParams);
+        kbToggleBtn.setOnClickListener(v -> cycleKeyboardState());
+        statusMenuBar.addView(kbToggleBtn);
+
+        // Centered info layout (Name & FPS)
+        LinearLayout infoCenter = new LinearLayout(this);
+        infoCenter.setOrientation(LinearLayout.VERTICAL);
+        infoCenter.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f
+        );
+        infoCenter.setLayoutParams(infoParams);
 
         gameNameText = new TextView(this);
         gameNameText.setText(gameName);
         gameNameText.setTextColor(Color.parseColor("#E0E0FF"));
         gameNameText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         gameNameText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-        topStatusBar.addView(gameNameText, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f
-        ));
+        gameNameText.setSingleLine(true);
+        infoCenter.addView(gameNameText);
 
         fpsCounterText = new TextView(this);
         fpsCounterText.setText("0 FPS");
         fpsCounterText.setTextColor(Color.parseColor("#7B6FFF"));
-        fpsCounterText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        fpsCounterText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         fpsCounterText.setTypeface(Typeface.MONOSPACE);
         fpsCounterText.setVisibility(showFps ? View.VISIBLE : View.GONE);
-        topStatusBar.addView(fpsCounterText, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+        infoCenter.addView(fpsCounterText);
+
+        statusMenuBar.addView(infoCenter);
+
+        // Right ☰ menu button
+        menuOpenBtn = new TextView(this);
+        menuOpenBtn.setText("☰");
+        menuOpenBtn.setTextColor(Color.parseColor("#7B6FFF"));
+        menuOpenBtn.setGravity(Gravity.CENTER);
+        menuOpenBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        menuOpenBtn.setPadding(dpToPx(16), 0, dpToPx(16), 0);
+        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(
+                dpToPx(56), ViewGroup.LayoutParams.MATCH_PARENT
+        );
+        menuOpenBtn.setLayoutParams(menuParams);
+        menuOpenBtn.setOnClickListener(v -> toggleQuickMenu());
+        statusMenuBar.addView(menuOpenBtn);
     }
 
     private void setupSurfaceView() {
         surfaceView = new EmulatorSurfaceView(this);
         surfaceView.setScreenFilterBilinear(screenFilterBilinear);
 
-        // Standard 4:3 lock layout params centered inside wrapper
         FrameLayout.LayoutParams svParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -200,7 +237,6 @@ public class EmulatorActivity extends AppCompatActivity {
         svParams.gravity = Gravity.CENTER;
         surfaceView.setLayoutParams(svParams);
 
-        // Keep direct mouse touch input from MainActivity
         setupMouseInput();
     }
 
@@ -238,7 +274,7 @@ public class EmulatorActivity extends AppCompatActivity {
 
                     int clickState = 0;
                     if (action != MotionEvent.ACTION_UP) {
-                        clickState |= 1; // Left click on down/move
+                        clickState |= 1;
                     }
 
                     int keyOrButton = mouseX | (mouseY << 16);
@@ -254,19 +290,14 @@ public class EmulatorActivity extends AppCompatActivity {
         controlsArea = new FrameLayout(this);
         LinearLayout.LayoutParams caParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                dpToPx(240) // Standard height of virtual controller area
+                dpToPx(240) // 240dp high for gamepad area
         );
         controlsArea.setLayoutParams(caParams);
         controlsArea.setBackgroundColor(Color.parseColor("#0D0D0F"));
 
-        // A. Virtual Pad Overlay Container
+        // Authentic FM Towns Marty layout gamepad area
         setupVirtualGamepad();
         controlsArea.addView(virtualPadContainer);
-
-        // B. Custom Soft Keyboard Panel Overlay
-        setupSoftKeyboard();
-        keyboardContainer.setVisibility(View.GONE);
-        controlsArea.addView(keyboardContainer);
     }
 
     private void setupVirtualGamepad() {
@@ -280,22 +311,21 @@ public class EmulatorActivity extends AppCompatActivity {
         // Adjust dimensions based on SharedPreferences size setting
         float scale = 1.0f;
         if ("small".equals(virtualPadSize)) {
-            scale = 0.8f;
+            scale = 0.82f;
         } else if ("large".equals(virtualPadSize)) {
             scale = 1.15f;
         }
 
-        int dpadSize = (int) (dpToPx(136) * scale);
-        int actionSize = (int) (dpToPx(136) * scale);
+        int dpadSize = (int) (dpToPx(140) * scale);
 
-        // 1. LEFT side: D-Pad (cross style)
+        // 1. LEFT SIDE: D-Pad (cross style)
         RelativeLayout dpadLayout = new RelativeLayout(this);
         RelativeLayout.LayoutParams dpadParams = new RelativeLayout.LayoutParams(
                 dpadSize, dpadSize
         );
         dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
         dpadParams.addRule(RelativeLayout.CENTER_VERTICAL);
-        dpadParams.leftMargin = dpToPx(12);
+        dpadParams.leftMargin = dpToPx(16);
         dpadLayout.setLayoutParams(dpadParams);
 
         int btnSize = dpadSize / 3;
@@ -330,65 +360,36 @@ public class EmulatorActivity extends AppCompatActivity {
 
         virtualPadContainer.addView(dpadLayout);
 
-        // 2. RIGHT side: 4 Action Buttons in Diamond layout
-        RelativeLayout diamondLayout = new RelativeLayout(this);
-        RelativeLayout.LayoutParams diamondParams = new RelativeLayout.LayoutParams(
-                actionSize, actionSize
+        // 2. RIGHT SIDE: Only 2 buttons in vertical layout (A: Red Top, B: Blue Bottom)
+        LinearLayout rightBtnsLayout = new LinearLayout(this);
+        rightBtnsLayout.setOrientation(LinearLayout.VERTICAL);
+        rightBtnsLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+        RelativeLayout.LayoutParams rightBtnsParams = new RelativeLayout.LayoutParams(
+                (int) (dpToPx(72) * scale), ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        diamondParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-        diamondParams.addRule(RelativeLayout.CENTER_VERTICAL);
-        diamondParams.rightMargin = dpToPx(12);
-        diamondLayout.setLayoutParams(diamondParams);
+        rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
+        rightBtnsParams.addRule(RelativeLayout.CENTER_VERTICAL);
+        rightBtnsParams.rightMargin = dpToPx(24);
+        rightBtnsLayout.setLayoutParams(rightBtnsParams);
 
-        int actBtnSize = actionSize / 3;
+        int actBtnSize = (int) (dpToPx(52) * scale);
 
-        // Y = yellow (top)
-        View yBtn = createVirtualButton("Y", 1 << 8, Color.parseColor("#FFFF4D"));
-        RelativeLayout.LayoutParams yParams = new RelativeLayout.LayoutParams(actBtnSize, actBtnSize);
-        yParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
-        yParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
-        yBtn.setLayoutParams(yParams);
-        diamondLayout.addView(yBtn);
-
-        // A = red (bottom)
-        View aBtn = createVirtualButton("A", 1 << 0, Color.parseColor("#FF4D4D"));
-        RelativeLayout.LayoutParams aParams = new RelativeLayout.LayoutParams(actBtnSize, actBtnSize);
-        aParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
-        aParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
+        // A Button (Red, Top) -> bitmask 1 << 0
+        View aBtn = createCircularGamepadBtn("A", 1 << 0, Color.parseColor("#FF4D4D"));
+        LinearLayout.LayoutParams aParams = new LinearLayout.LayoutParams(actBtnSize, actBtnSize);
+        aParams.bottomMargin = dpToPx(16);
         aBtn.setLayoutParams(aParams);
-        diamondLayout.addView(aBtn);
+        rightBtnsLayout.addView(aBtn);
 
-        // X = green (left) - Let's map X as an extra space button! Wait, we will also map Space (0x35) or Enter as alternate keyboard outputs
-        View xBtn = createVirtualButton("X", 0, Color.parseColor("#4DFF4D"));
-        // Custom touch for X that sends TOWNS_JISKEY_SPACE (0x35)
-        xBtn.setOnTouchListener((v, event) -> {
-            int action = event.getAction();
-            if (action == MotionEvent.ACTION_DOWN) {
-                v.setAlpha(0.4f);
-                EmulatorCore.nativeSendInput(0, 0x35, 1); // Press Space
-            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                v.setAlpha(1.0f);
-                EmulatorCore.nativeSendInput(0, 0x35, 0); // Release Space
-            }
-            return true;
-        });
-        RelativeLayout.LayoutParams xParams = new RelativeLayout.LayoutParams(actBtnSize, actBtnSize);
-        xParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-        xParams.addRule(RelativeLayout.CENTER_VERTICAL);
-        xBtn.setLayoutParams(xParams);
-        diamondLayout.addView(xBtn);
-
-        // B = blue (right)
-        View bBtn = createVirtualButton("B", 1 << 1, Color.parseColor("#4D94FF"));
-        RelativeLayout.LayoutParams bParams = new RelativeLayout.LayoutParams(actBtnSize, actBtnSize);
-        bParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-        bParams.addRule(RelativeLayout.CENTER_VERTICAL);
+        // B Button (Blue, Bottom) -> bitmask 1 << 1
+        View bBtn = createCircularGamepadBtn("B", 1 << 1, Color.parseColor("#4D94FF"));
+        LinearLayout.LayoutParams bParams = new LinearLayout.LayoutParams(actBtnSize, actBtnSize);
         bBtn.setLayoutParams(bParams);
-        diamondLayout.addView(bBtn);
+        rightBtnsLayout.addView(bBtn);
 
-        virtualPadContainer.addView(diamondLayout);
+        virtualPadContainer.addView(rightBtnsLayout);
 
-        // 3. CENTER: SELECT, START, SAVE, LOAD
+        // 3. CENTER: SELECT, RUN (start), SAVE (💾), LOAD (📂)
         LinearLayout centerBtns = new LinearLayout(this);
         centerBtns.setOrientation(LinearLayout.HORIZONTAL);
         centerBtns.setGravity(Gravity.CENTER);
@@ -399,88 +400,84 @@ public class EmulatorActivity extends AppCompatActivity {
         centerParams.addRule(RelativeLayout.CENTER_IN_PARENT);
         centerBtns.setLayoutParams(centerParams);
 
+        int centW = (int) (dpToPx(48) * scale);
+        int centH = (int) (dpToPx(36) * scale);
+
         // SELECT button
         View selectBtn = createVirtualButton("SEL", 1 << 7, Color.parseColor("#808080"));
-        LinearLayout.LayoutParams selParams = new LinearLayout.LayoutParams(dpToPx(44), dpToPx(34));
+        LinearLayout.LayoutParams selParams = new LinearLayout.LayoutParams(centW, centH);
         selParams.rightMargin = dpToPx(6);
         selectBtn.setLayoutParams(selParams);
         centerBtns.addView(selectBtn);
 
-        // START button
-        View startBtn = createVirtualButton("STA", 1 << 6, Color.parseColor("#808080"));
-        LinearLayout.LayoutParams staParams = new LinearLayout.LayoutParams(dpToPx(44), dpToPx(34));
-        staParams.rightMargin = dpToPx(10);
-        startBtn.setLayoutParams(staParams);
-        centerBtns.addView(startBtn);
+        // RUN button (Start on FM Towns Marty)
+        View runBtn = createVirtualButton("RUN", 1 << 6, Color.parseColor("#808080"));
+        LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(centW, centH);
+        runParams.rightMargin = dpToPx(10);
+        runBtn.setLayoutParams(runParams);
+        centerBtns.addView(runBtn);
 
-        // SAVE State button (Floppy)
+        // SAVE State button (Floppy 💾)
         View saveBtn = createTextOnlyBtn("💾 SV", Color.parseColor("#7B6FFF"));
-        LinearLayout.LayoutParams savParams = new LinearLayout.LayoutParams(dpToPx(56), dpToPx(34));
+        LinearLayout.LayoutParams savParams = new LinearLayout.LayoutParams((int)(dpToPx(56)*scale), centH);
         savParams.rightMargin = dpToPx(6);
         saveBtn.setLayoutParams(savParams);
         saveBtn.setOnClickListener(v -> saveStatePrompt());
         centerBtns.addView(saveBtn);
 
-        // LOAD State button (Floppy/Open)
+        // LOAD State button (Floppy/Open 📂)
         View loadBtn = createTextOnlyBtn("📂 LD", Color.parseColor("#7B6FFF"));
-        LinearLayout.LayoutParams loaParams = new LinearLayout.LayoutParams(dpToPx(56), dpToPx(34));
+        LinearLayout.LayoutParams loaParams = new LinearLayout.LayoutParams((int)(dpToPx(56)*scale), centH);
         loadBtn.setLayoutParams(loaParams);
         loadBtn.setOnClickListener(v -> loadStatePrompt());
         centerBtns.addView(loadBtn);
 
         virtualPadContainer.addView(centerBtns);
+    }
 
-        // 4. Auxiliary Buttons: Menu (Top Left), Keyboard (Top Right)
-        TextView menuIcon = new TextView(this);
-        menuIcon.setText("≡");
-        menuIcon.setTextColor(Color.parseColor("#7B6FFF"));
-        menuIcon.setGravity(Gravity.CENTER);
-        menuIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        GradientDrawable miBg = new GradientDrawable();
-        miBg.setColor(Color.parseColor("#33111318"));
-        miBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
-        miBg.setCornerRadius(dpToPx(18));
-        menuIcon.setBackground(miBg);
-        RelativeLayout.LayoutParams miParams = new RelativeLayout.LayoutParams(dpToPx(36), dpToPx(36));
-        miParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-        miParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
-        miParams.leftMargin = dpToPx(12);
-        miParams.topMargin = dpToPx(6);
-        menuIcon.setLayoutParams(miParams);
-        menuIcon.setOnClickListener(v -> toggleQuickMenu());
-        virtualPadContainer.addView(menuIcon);
+    private View createCircularGamepadBtn(String label, int bitmask, int borderHex) {
+        TextView btn = new TextView(this);
+        btn.setText(label);
+        btn.setTextColor(Color.WHITE);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        btn.setGravity(Gravity.CENTER);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
 
-        TextView kbIcon = new TextView(this);
-        kbIcon.setText("⌨️");
-        kbIcon.setGravity(Gravity.CENTER);
-        kbIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        GradientDrawable kiBg = new GradientDrawable();
-        kiBg.setColor(Color.parseColor("#33111318"));
-        kiBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
-        kiBg.setCornerRadius(dpToPx(18));
-        kbIcon.setBackground(kiBg);
-        RelativeLayout.LayoutParams kiParams = new RelativeLayout.LayoutParams(dpToPx(36), dpToPx(36));
-        kiParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-        kiParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
-        kiParams.rightMargin = dpToPx(12);
-        kiParams.topMargin = dpToPx(6);
-        kbIcon.setLayoutParams(kiParams);
-        kbIcon.setOnClickListener(v -> toggleKeyboard());
-        virtualPadContainer.addView(kbIcon);
+        // Circular background with border
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#D9111318"));
+        bg.setCornerRadius(dpToPx(28));
+        bg.setStroke(dpToPx(2), borderHex);
+        btn.setBackground(bg);
+
+        btn.setOnTouchListener((v, event) -> {
+            int action = event.getAction();
+            if (action == MotionEvent.ACTION_DOWN) {
+                v.setAlpha(0.4f);
+                currentGamepadMask |= bitmask;
+                EmulatorCore.nativeSendInput(1, currentGamepadMask, 0);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                v.setAlpha(1.0f);
+                currentGamepadMask &= ~bitmask;
+                EmulatorCore.nativeSendInput(1, currentGamepadMask, 0);
+            }
+            return true;
+        });
+
+        return btn;
     }
 
     private View createVirtualButton(String label, int bitmask, int borderHex) {
         TextView btn = new TextView(this);
         btn.setText(label);
         btn.setTextColor(Color.WHITE);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         btn.setGravity(Gravity.CENTER);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
 
-        // Circular background with specific border color
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(Color.parseColor("#D9111318"));
-        bg.setCornerRadius(dpToPx(24));
+        bg.setCornerRadius(dpToPx(20));
         bg.setStroke(dpToPx(2), borderHex);
         btn.setBackground(bg);
 
@@ -507,7 +504,7 @@ public class EmulatorActivity extends AppCompatActivity {
         TextView btn = new TextView(this);
         btn.setText(label);
         btn.setTextColor(Color.WHITE);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         btn.setGravity(Gravity.CENTER);
         btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
 
@@ -520,117 +517,164 @@ public class EmulatorActivity extends AppCompatActivity {
         return btn;
     }
 
-    private void setupSoftKeyboard() {
+    private void setupSoftKeyboardContainer() {
         keyboardContainer = new LinearLayout(this);
         keyboardContainer.setOrientation(LinearLayout.VERTICAL);
-        keyboardContainer.setBackgroundColor(Color.parseColor("#15171F"));
-        keyboardContainer.setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6));
-        keyboardContainer.setLayoutParams(new FrameLayout.LayoutParams(
+        keyboardContainer.setBackgroundColor(Color.parseColor("#CC0D0D0F")); // Semi-transparent dark background
+        keyboardContainer.setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
+        keyboardContainer.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+                ViewGroup.LayoutParams.WRAP_CONTENT
         ));
-
-        // Add a clean top toggle bar inside keyboard overlay
-        LinearLayout topBar = new LinearLayout(this);
-        topBar.setOrientation(LinearLayout.HORIZONTAL);
-        topBar.setGravity(Gravity.CENTER_VERTICAL);
-        topBar.setPadding(dpToPx(8), 0, dpToPx(8), dpToPx(4));
-
-        TextView title = new TextView(this);
-        title.setText("Virtual Keyboard");
-        title.setTextColor(Color.parseColor("#7B6FFF"));
-        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        topBar.addView(title, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f
-        ));
-
-        TextView closeKb = new TextView(this);
-        closeKb.setText("Close ✕ ");
-        closeKb.setTextColor(Color.WHITE);
-        closeKb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        closeKb.setTypeface(Typeface.DEFAULT_BOLD);
-        closeKb.setOnClickListener(v -> toggleKeyboard());
-        topBar.addView(closeKb);
-
-        keyboardContainer.addView(topBar);
-
-        // 4 Rows of standard keyboards
-        LinearLayout row1 = createKeyboardRow(new String[]{"Esc", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "BS"},
-                new int[]{0x01, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x0F});
-        keyboardContainer.addView(row1);
-
-        LinearLayout row2 = createKeyboardRow(new String[]{"Tab", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "Ent"},
-                new int[]{0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1D});
-        keyboardContainer.addView(row2);
-
-        LinearLayout row3 = createKeyboardRow(new String[]{"Ctrl", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "Shft"},
-                new int[]{0x52, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x53});
-        keyboardContainer.addView(row3);
-
-        LinearLayout row4 = createKeyboardRow(new String[]{"Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "Space"},
-                new int[]{0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x30, 0x31, 0x32, 0x33, 0x35});
-        keyboardContainer.addView(row4);
     }
 
-    private LinearLayout createKeyboardRow(String[] labels, int[] keycodes) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f
+    private void cycleKeyboardState() {
+        keyboardState = (keyboardState + 1) % 3; // Cycle: 0 -> 1 -> 2 -> 0
+        updateKeyboardOverlay();
+    }
+
+    private void updateKeyboardOverlay() {
+        keyboardContainer.removeAllViews();
+        if (keyboardState == 0) {
+            keyboardContainer.setVisibility(View.GONE);
+            kbToggleBtn.setTextColor(Color.WHITE);
+        } else {
+            keyboardContainer.setVisibility(View.VISIBLE);
+            kbToggleBtn.setTextColor(Color.parseColor("#7B6FFF")); // Highlight keyboard icon
+
+            if (keyboardState == 1) {
+                // Basic mode
+                buildBasicKeyboard();
+            } else {
+                // Full mode
+                buildFullKeyboard();
+            }
+        }
+    }
+
+    private void buildBasicKeyboard() {
+        String[][] basicLabels = {
+            {"ESC", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"},
+            {"TAB", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P"},
+            {"CTRL", "A", "S", "D", "F", "G", "H", "J", "K", "L", "ENTER"},
+            {"SHIFT", "Z", "X", "C", "V", "B", "N", "M", "SPACE", "BACK"}
+        };
+        int[][] basicCodes = {
+            {111, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140},
+            {61, 45, 51, 33, 46, 48, 53, 49, 37, 43, 44},
+            {113, 29, 47, 32, 34, 35, 36, 38, 39, 40, 66},
+            {59, 54, 52, 31, 50, 30, 42, 41, 62, 67}
+        };
+
+        for (int r = 0; r < basicLabels.length; ++r) {
+            keyboardContainer.addView(createHorizontalRow(basicLabels[r], basicCodes[r]));
+        }
+    }
+
+    private void buildFullKeyboard() {
+        String[][] fullLabels = {
+            {"BREAK", "COPY", "DEL", "INS", "HOME", "END", "PGUP", "PGDN"},
+            {"ESC", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"},
+            {"`", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "BACK"},
+            {"TAB", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", "¥"},
+            {"CTRL", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "ENTER"},
+            {"SHIFT", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "SHIFT"},
+            {"SPACE"},
+            {"←", "↑", "↓", "→"}
+        };
+        int[][] fullCodes = {
+            {121, 278, 112, 124, 122, 123, 92, 93},
+            {111, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140},
+            {68, 8, 9, 10, 11, 12, 13, 14, 15, 16, 7, 69, 70, 67},
+            {61, 45, 51, 33, 46, 48, 53, 49, 37, 43, 44, 71, 72, 252},
+            {113, 29, 47, 32, 34, 35, 36, 38, 39, 40, 74, 75, 66},
+            {59, 54, 52, 31, 50, 30, 42, 41, 55, 56, 76, 59},
+            {62},
+            {21, 19, 20, 22}
+        };
+
+        for (int r = 0; r < fullLabels.length; ++r) {
+            keyboardContainer.addView(createHorizontalRow(fullLabels[r], fullCodes[r]));
+        }
+    }
+
+    private View createHorizontalRow(String[] labels, int[] codes) {
+        HorizontalScrollView hsv = new HorizontalScrollView(this);
+        hsv.setHorizontalScrollBarEnabled(false);
+        hsv.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        rp.topMargin = dpToPx(3);
-        row.setLayoutParams(rp);
+        rowParams.topMargin = dpToPx(4);
+        rowParams.bottomMargin = dpToPx(4);
+        hsv.setLayoutParams(rowParams);
+
+        LinearLayout rowLayout = new LinearLayout(this);
+        rowLayout.setOrientation(LinearLayout.HORIZONTAL);
+        rowLayout.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
+        ));
 
         for (int i = 0; i < labels.length; ++i) {
-            final int code = keycodes[i];
-            TextView key = new TextView(this);
-            key.setText(labels[i]);
-            key.setTextColor(Color.WHITE);
-            key.setGravity(Gravity.CENTER);
-            key.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-            key.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-
-            GradientDrawable kBg = new GradientDrawable();
-            kBg.setColor(Color.parseColor("#252834"));
-            kBg.setCornerRadius(dpToPx(4));
-            kBg.setStroke(dpToPx(1), Color.parseColor("#3B3E4F"));
-            key.setBackground(kBg);
-
-            LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1.0f
-            );
-            kp.leftMargin = dpToPx(3);
-            kp.rightMargin = dpToPx(3);
-            key.setLayoutParams(kp);
-
-            key.setOnTouchListener((v, event) -> {
-                int action = event.getAction();
-                if (action == MotionEvent.ACTION_DOWN) {
-                    v.setAlpha(0.4f);
-                    EmulatorCore.nativeSendInput(0, code, 1); // Press key
-                } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                    v.setAlpha(1.0f);
-                    EmulatorCore.nativeSendInput(0, code, 0); // Release key
-                }
-                return true;
-            });
-
-            row.addView(key);
+            rowLayout.addView(createKeyView(labels[i], codes[i]));
         }
-        return row;
+
+        hsv.addView(rowLayout);
+        return hsv;
     }
 
-    private void toggleKeyboard() {
-        if (isKeyboardOpen) {
-            keyboardContainer.setVisibility(View.GONE);
-            virtualPadContainer.setVisibility(View.VISIBLE);
-            isKeyboardOpen = false;
-        } else {
-            virtualPadContainer.setVisibility(View.GONE);
-            keyboardContainer.setVisibility(View.VISIBLE);
-            isKeyboardOpen = true;
+    private View createKeyView(String label, final int code) {
+        TextView key = new TextView(this);
+        key.setText(label);
+        key.setGravity(Gravity.CENTER);
+        key.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        key.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+
+        boolean isSpecial = isSpecialKey(label);
+
+        // Key style matching instructions
+        GradientDrawable kBg = new GradientDrawable();
+        kBg.setColor(Color.parseColor(isSpecial ? "#1F1F35" : "#1A1A28"));
+        kBg.setStroke(dpToPx(1), Color.parseColor("#2A2A3A"));
+        kBg.setCornerRadius(dpToPx(6));
+        key.setBackground(kBg);
+
+        key.setTextColor(Color.parseColor(isSpecial ? "#7B6FFF" : "#E0E0FF"));
+
+        // Height & Width constraints (min height 36dp)
+        int keyHeight = dpToPx(38);
+        int keyWidth = "SPACE".equals(label) ? dpToPx(160) : dpToPx(42);
+        if (label.length() > 3 && !"SPACE".equals(label)) {
+            keyWidth = dpToPx(56);
         }
+
+        LinearLayout.LayoutParams kp = new LinearLayout.LayoutParams(keyWidth, keyHeight);
+        kp.leftMargin = dpToPx(4);
+        kp.rightMargin = dpToPx(4);
+        key.setLayoutParams(kp);
+
+        // Key Touch Events mapping to nativeSendKey
+        key.setOnTouchListener((v, event) -> {
+            int action = event.getAction();
+            if (action == MotionEvent.ACTION_DOWN) {
+                v.setAlpha(0.4f);
+                EmulatorCore.nativeSendKey(code, true);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                v.setAlpha(1.0f);
+                EmulatorCore.nativeSendKey(code, false);
+            }
+            return true;
+        });
+
+        return key;
+    }
+
+    private boolean isSpecialKey(String label) {
+        return "ESC".equals(label) || "CTRL".equals(label) || "SHIFT".equals(label) ||
+               "ENTER".equals(label) || "BREAK".equals(label) || "COPY".equals(label) ||
+               "BACK".equals(label) || "TAB".equals(label) || "INS".equals(label) ||
+               "DEL".equals(label) || "HOME".equals(label) || "END".equals(label) ||
+               "PGUP".equals(label) || "PGDN".equals(label);
     }
 
     private void setupQuickMenuOverlay() {
@@ -640,10 +684,9 @@ public class EmulatorActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         );
         quickMenuOverlay.setLayoutParams(overlayParams);
-        quickMenuOverlay.setBackgroundColor(Color.parseColor("#AA000000")); // semi-transparent dark tint
+        quickMenuOverlay.setBackgroundColor(Color.parseColor("#AA000000"));
         quickMenuOverlay.setVisibility(View.GONE);
 
-        // Slide panel
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setBackgroundColor(Color.parseColor("#111318"));
@@ -655,13 +698,11 @@ public class EmulatorActivity extends AppCompatActivity {
         panelParams.gravity = Gravity.TOP;
         panel.setLayoutParams(panelParams);
 
-        // Slide-down aesthetics: neon border at bottom
         GradientDrawable pbBg = new GradientDrawable();
         pbBg.setColor(Color.parseColor("#111318"));
         pbBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
         panel.setBackground(pbBg);
 
-        // Menu Title
         TextView menuTitle = new TextView(this);
         menuTitle.setText("FM Infinite — Quick Menu");
         menuTitle.setTextColor(Color.parseColor("#7B6FFF"));
@@ -675,7 +716,6 @@ public class EmulatorActivity extends AppCompatActivity {
         menuTitle.setLayoutParams(mtParams);
         panel.addView(menuTitle);
 
-        // Buttons
         addButtonToPanel(panel, getString(R.string.quick_save_state), v -> saveStatePrompt());
         addButtonToPanel(panel, getString(R.string.quick_load_state), v -> loadStatePrompt());
         addButtonToPanel(panel, getString(R.string.quick_reset), v -> {
@@ -691,7 +731,6 @@ public class EmulatorActivity extends AppCompatActivity {
         });
         addButtonToPanel(panel, getString(R.string.quick_exit), v -> showExitConfirmation());
 
-        // Cancel/Dismiss area below
         TextView closeBtn = new TextView(this);
         closeBtn.setText("Dismiss Menu ✕");
         closeBtn.setTextColor(Color.parseColor("#666680"));
@@ -708,7 +747,6 @@ public class EmulatorActivity extends AppCompatActivity {
 
         quickMenuOverlay.addView(panel);
 
-        // Dismiss menu if touching outside of the slide down panel
         quickMenuOverlay.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 toggleQuickMenu();
@@ -780,7 +818,6 @@ public class EmulatorActivity extends AppCompatActivity {
         boolean ok = EmulatorCore.nativeSaveState(stateFile.getAbsolutePath());
         if (ok) {
             Toast.makeText(this, String.format(getString(R.string.state_saved), slotIndex), Toast.LENGTH_SHORT).show();
-            // Sync to SAF
             Uri storageUri = StorageHelper.getPersistedUri(this);
             if (storageUri != null) {
                 StorageHelper.syncLocalSavesToSAF(this, storageUri);
@@ -830,11 +867,9 @@ public class EmulatorActivity extends AppCompatActivity {
         if (!biosDir.exists()) biosDir.mkdirs();
         if (!romsDir.exists()) romsDir.mkdirs();
 
-        // Initialize core
         boolean inited = EmulatorCore.nativeInit(biosDir.getAbsolutePath(), romsDir.getAbsolutePath());
         if (inited) {
             Log.i(TAG, "Core initialized successfully.");
-            // Load ROM/Disc
             boolean loaded = EmulatorCore.nativeLoadROM(gamePath);
             if (!loaded) {
                 loaded = EmulatorCore.nativeLoadDisc(gamePath);
@@ -848,7 +883,6 @@ public class EmulatorActivity extends AppCompatActivity {
             Toast.makeText(this, "Core Setup failed. Ensure you copied your FM Towns BIOS ROMs to the bios/ folder.", Toast.LENGTH_LONG).show();
         }
 
-        // Start frame loop
         if (!isRunning) {
             isRunning = true;
             fpsLastTime = SystemClock.elapsedRealtime();
@@ -861,13 +895,9 @@ public class EmulatorActivity extends AppCompatActivity {
         @Override
         public void doFrame(long frameTimeNanos) {
             if (isRunning) {
-                // Execute core frame step
                 EmulatorCore.nativeRunFrame();
-
-                // Request SurfaceView to render
                 surfaceView.drawFrame();
 
-                // Calculate FPS
                 fpsFrameCount++;
                 long now = SystemClock.elapsedRealtime();
                 long diff = now - fpsLastTime;
@@ -878,7 +908,6 @@ public class EmulatorActivity extends AppCompatActivity {
                     fpsFrameCount = 0;
                 }
 
-                // Schedule next
                 Choreographer.getInstance().postFrameCallback(this);
             }
         }
@@ -899,8 +928,6 @@ public class EmulatorActivity extends AppCompatActivity {
     private void exitEmulator() {
         isRunning = false;
         EmulatorCore.nativeShutdown();
-
-        // Sync local saves and states to SAF
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
             StorageHelper.syncLocalSavesToSAF(this, storageUri);

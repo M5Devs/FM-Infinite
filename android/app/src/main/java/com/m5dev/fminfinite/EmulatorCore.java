@@ -29,4 +29,5 @@ public class EmulatorCore {
     public static native void nativeShutdown();
     public static native boolean nativeSaveState(String statePath);
     public static native boolean nativeLoadState(String statePath);
+    public static native void nativeSendKey(int keyCode, boolean pressed);
 }
