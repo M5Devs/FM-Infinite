@@ -110,6 +110,7 @@ set(CORE_SOURCES
     "${CORE_ROOT}/externals/yssimplesound/src/nownd/yssimplesound_nownd.cpp"
 
     # ← ده اللي كان ناقص! YsPng
+    "${CORE_ROOT}/externals/yspng/yspng.cpp"
     "${CORE_ROOT}/externals/yspng/yspngenc.cpp"
 
     # I8251 to Socket & Yssocket
