@@ -107,7 +107,7 @@ set(CORE_SOURCES
 
     # ← ده اللي كان ناقص! YsSoundPlayer
     "${CORE_ROOT}/externals/yssimplesound/src/yssimplesound.cpp"
-    "${CORE_ROOT}/externals/yssimplesound/src/yssimplesound_opensl.cpp"
+    "${CORE_ROOT}/externals/yssimplesound/src/yssimplesound_nownd.cpp"
 
     # ← ده اللي كان ناقص! YsPng
     "${CORE_ROOT}/externals/yspng/yspngenc.cpp"
