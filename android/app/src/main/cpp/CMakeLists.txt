@@ -1,5 +1,5 @@
 # LICENSE>>
-# Copyright 2025 M5_Development (FM Infinite Authors)
+# Copyright 2025 M5 Dev (FM Infinite Authors)
 #
 # Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 #
@@ -107,7 +107,7 @@ set(CORE_SOURCES
 
     # ← ده اللي كان ناقص! YsSoundPlayer
     "${CORE_ROOT}/externals/yssimplesound/src/yssimplesound.cpp"
-    "${CORE_ROOT}/externals/yssimplesound/src/yssimplesound_nownd.cpp"
+    "${CORE_ROOT}/externals/yssimplesound/src/nownd/yssimplesound_nownd.cpp"
 
     # ← ده اللي كان ناقص! YsPng
     "${CORE_ROOT}/externals/yspng/yspngenc.cpp"
