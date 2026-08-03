@@ -441,4 +441,132 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeShutdown(JNIEnv *env, jobject thiz)
     LOGI("Emulator core shutdown completed");
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSaveState(JNIEnv *env, jobject thiz, jstring statePath)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_towns == nullptr) return JNI_FALSE;
+
+    const char *c_state_path = env->GetStringUTFChars(statePath, nullptr);
+    std::string path_str(c_state_path);
+    env->ReleaseStringUTFChars(statePath, c_state_path);
+
+    bool result = g_towns->SaveState(path_str);
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadState(JNIEnv *env, jobject thiz, jstring statePath)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_towns == nullptr) return JNI_FALSE;
+
+    const char *c_state_path = env->GetStringUTFChars(statePath, nullptr);
+    std::string path_str(c_state_path);
+    env->ReleaseStringUTFChars(statePath, c_state_path);
+
+    bool result = g_towns->LoadState(path_str);
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSendKey(JNIEnv *env, jclass clazz, jint keyCode, jboolean pressed)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_towns == nullptr) return;
+
+    int townsKey = -1;
+    switch (keyCode) {
+        case 111: townsKey = TOWNS_JISKEY_ESC; break;
+        case 131: townsKey = TOWNS_JISKEY_PF01; break;
+        case 132: townsKey = TOWNS_JISKEY_PF02; break;
+        case 133: townsKey = TOWNS_JISKEY_PF03; break;
+        case 134: townsKey = TOWNS_JISKEY_PF04; break;
+        case 135: townsKey = TOWNS_JISKEY_PF05; break;
+        case 136: townsKey = TOWNS_JISKEY_PF06; break;
+        case 137: townsKey = TOWNS_JISKEY_PF07; break;
+        case 138: townsKey = TOWNS_JISKEY_PF08; break;
+        case 139: townsKey = TOWNS_JISKEY_PF09; break;
+        case 140: townsKey = TOWNS_JISKEY_PF10; break;
+        case 61:  townsKey = TOWNS_JISKEY_TAB; break;
+        case 66:  townsKey = TOWNS_JISKEY_RETURN; break;
+        case 67:  townsKey = TOWNS_JISKEY_BACKSPACE; break;
+        case 112: townsKey = TOWNS_JISKEY_DELETE; break;
+        case 113: townsKey = TOWNS_JISKEY_CTRL; break;
+        case 114: townsKey = TOWNS_JISKEY_CTRL; break;
+        case 59:  townsKey = TOWNS_JISKEY_SHIFT; break;
+        case 60:  townsKey = TOWNS_JISKEY_SHIFT; break;
+        case 62:  townsKey = TOWNS_JISKEY_SPACE; break;
+        case 121: townsKey = TOWNS_JISKEY_BREAK; break;
+        case 124: townsKey = TOWNS_JISKEY_INSERT; break;
+        case 122: townsKey = TOWNS_JISKEY_HOME; break;
+        case 123: townsKey = TOWNS_JISKEY_CANCEL; break;
+        case 92:  townsKey = TOWNS_JISKEY_PREV; break;
+        case 93:  townsKey = TOWNS_JISKEY_NEXT; break;
+        case 278: townsKey = TOWNS_JISKEY_EXECUTE; break;
+        case 68:  townsKey = TOWNS_JISKEY_HAT; break;
+        case 7:   townsKey = TOWNS_JISKEY_0; break;
+        case 8:   townsKey = TOWNS_JISKEY_1; break;
+        case 9:   townsKey = TOWNS_JISKEY_2; break;
+        case 10:  townsKey = TOWNS_JISKEY_3; break;
+        case 11:  townsKey = TOWNS_JISKEY_4; break;
+        case 12:  townsKey = TOWNS_JISKEY_5; break;
+        case 13:  townsKey = TOWNS_JISKEY_6; break;
+        case 14:  townsKey = TOWNS_JISKEY_7; break;
+        case 15:  townsKey = TOWNS_JISKEY_8; break;
+        case 16:  townsKey = TOWNS_JISKEY_9; break;
+        case 69:  townsKey = TOWNS_JISKEY_MINUS; break;
+        case 70:  townsKey = TOWNS_JISKEY_HAT; break;
+        case 252: townsKey = TOWNS_JISKEY_BACKSLASH; break;
+        case 73:  townsKey = TOWNS_JISKEY_BACKSLASH; break;
+        case 29:  townsKey = TOWNS_JISKEY_A; break;
+        case 30:  townsKey = TOWNS_JISKEY_B; break;
+        case 31:  townsKey = TOWNS_JISKEY_C; break;
+        case 32:  townsKey = TOWNS_JISKEY_D; break;
+        case 33:  townsKey = TOWNS_JISKEY_E; break;
+        case 34:  townsKey = TOWNS_JISKEY_F; break;
+        case 35:  townsKey = TOWNS_JISKEY_G; break;
+        case 36:  townsKey = TOWNS_JISKEY_H; break;
+        case 37:  townsKey = TOWNS_JISKEY_I; break;
+        case 38:  townsKey = TOWNS_JISKEY_J; break;
+        case 39:  townsKey = TOWNS_JISKEY_K; break;
+        case 40:  townsKey = TOWNS_JISKEY_L; break;
+        case 41:  townsKey = TOWNS_JISKEY_M; break;
+        case 42:  townsKey = TOWNS_JISKEY_N; break;
+        case 43:  townsKey = TOWNS_JISKEY_O; break;
+        case 44:  townsKey = TOWNS_JISKEY_P; break;
+        case 45:  townsKey = TOWNS_JISKEY_Q; break;
+        case 46:  townsKey = TOWNS_JISKEY_R; break;
+        case 47:  townsKey = TOWNS_JISKEY_S; break;
+        case 48:  townsKey = TOWNS_JISKEY_T; break;
+        case 49:  townsKey = TOWNS_JISKEY_U; break;
+        case 50:  townsKey = TOWNS_JISKEY_V; break;
+        case 51:  townsKey = TOWNS_JISKEY_W; break;
+        case 52:  townsKey = TOWNS_JISKEY_X; break;
+        case 53:  townsKey = TOWNS_JISKEY_Y; break;
+        case 54:  townsKey = TOWNS_JISKEY_Z; break;
+        case 71:  townsKey = TOWNS_JISKEY_LEFT_SQ_BRACKET; break;
+        case 72:  townsKey = TOWNS_JISKEY_RIGHT_SQ_BRACKET; break;
+        case 74:  townsKey = TOWNS_JISKEY_SEMICOLON; break;
+        case 75:  townsKey = TOWNS_JISKEY_COLON; break;
+        case 55:  townsKey = TOWNS_JISKEY_COMMA; break;
+        case 56:  townsKey = TOWNS_JISKEY_DOT; break;
+        case 76:  townsKey = TOWNS_JISKEY_SLASH; break;
+        case 19:  townsKey = TOWNS_JISKEY_UP; break;
+        case 20:  townsKey = TOWNS_JISKEY_DOWN; break;
+        case 21:  townsKey = TOWNS_JISKEY_LEFT; break;
+        case 22:  townsKey = TOWNS_JISKEY_RIGHT; break;
+    }
+
+    if (townsKey != -1) {
+        if (pressed) {
+            g_towns->keyboard.PushFifo(TOWNS_KEYFLAG_JIS_PRESS, townsKey);
+        } else {
+            g_towns->keyboard.PushFifo(TOWNS_KEYFLAG_JIS_RELEASE, townsKey);
+        }
+    } else {
+        LOGE("nativeSendKey: Unmapped keyCode %d", keyCode);
+    }
+}
+
 }

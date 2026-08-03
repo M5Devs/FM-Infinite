@@ -24,17 +24,29 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
         android:allowBackup="true"
         android:label="FM Infinite"
         android:supportsRtl="true"
-        android:theme="@style/Theme.AppCompat.NoActionBar">
+        android:theme="@style/Theme.FMInfinite">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="landscape"
+            android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".FirstLaunchActivity"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
+        <activity
+            android:name=".EmulatorActivity"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
+        <activity
+            android:name=".SettingsActivity"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
     </application>
 
 </manifest>

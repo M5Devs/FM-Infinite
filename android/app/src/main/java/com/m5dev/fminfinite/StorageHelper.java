@@ -38,6 +38,7 @@ public class StorageHelper {
     public static final String SUBFOLDER_ROMS = "roms";
     public static final String SUBFOLDER_SAVES = "saves";
     public static final String SUBFOLDER_STATES = "states";
+    public static final String SUBFOLDER_COVERS = "covers";
 
     public static boolean isAndroid11OrHigher() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
@@ -89,6 +90,7 @@ public class StorageHelper {
         createSubfolderIfMissing(rootDir, SUBFOLDER_ROMS);
         createSubfolderIfMissing(rootDir, SUBFOLDER_SAVES);
         createSubfolderIfMissing(rootDir, SUBFOLDER_STATES);
+        createSubfolderIfMissing(rootDir, SUBFOLDER_COVERS);
 
         // Synchronize files from DocumentTree to local app private storage for C++ core usage
         File localRoot = context.getExternalFilesDir(null);
@@ -101,6 +103,7 @@ public class StorageHelper {
         syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_ROMS);
         syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_SAVES);
         syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_STATES);
+        syncDocToLocal(context, rootDir, localRoot, SUBFOLDER_COVERS);
     }
 
     private static void createSubfolderIfMissing(DocumentFile root, String name) {

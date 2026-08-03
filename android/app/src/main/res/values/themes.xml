@@ -1,4 +1,6 @@
-/* LICENSE>>
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+LICENSE>>
 Copyright 2025 M5_Development (FM Infinite Authors)
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -11,23 +13,18 @@ Redistribution and use in source and binary forms, with or without modification,
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-<< LICENSE */
-
-package com.m5dev.fminfinite;
-
-public class EmulatorCore {
-    static {
-        System.loadLibrary("fminfinite_core");
-    }
-
-    public static native boolean nativeInit(String romDir, String sharedDir);
-    public static native boolean nativeLoadROM(String romPath);
-    public static native boolean nativeLoadDisc(String discPath);
-    public static native void nativeRunFrame();
-    public static native boolean nativeGetFrameBuffer(int[] outPixels, int[] outSize);
-    public static native void nativeSendInput(int type, int keyOrButton, int extra);
-    public static native void nativeShutdown();
-    public static native boolean nativeSaveState(String statePath);
-    public static native boolean nativeLoadState(String statePath);
-    public static native void nativeSendKey(int keyCode, boolean pressed);
-}
+<< LICENSE
+-->
+<resources>
+    <style name="Theme.FMInfinite" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/colorBackground</item>
+        <item name="android:colorBackground">@color/colorBackground</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorBackground</item>
+        <item name="android:textColor">@color/colorText</item>
+        <item name="android:textColorSecondary">@color/colorSubtext</item>
+        <item name="android:navigationBarColor">@color/colorBackground</item>
+        <item name="android:statusBarColor">@color/colorBackground</item>
+    </style>
+</resources>
