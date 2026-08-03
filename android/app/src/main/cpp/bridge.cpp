@@ -441,4 +441,32 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeShutdown(JNIEnv *env, jobject thiz)
     LOGI("Emulator core shutdown completed");
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSaveState(JNIEnv *env, jobject thiz, jstring statePath)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_towns == nullptr) return JNI_FALSE;
+
+    const char *c_state_path = env->GetStringUTFChars(statePath, nullptr);
+    std::string path_str(c_state_path);
+    env->ReleaseStringUTFChars(statePath, c_state_path);
+
+    bool result = g_towns->SaveState(path_str);
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadState(JNIEnv *env, jobject thiz, jstring statePath)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_towns == nullptr) return JNI_FALSE;
+
+    const char *c_state_path = env->GetStringUTFChars(statePath, nullptr);
+    std::string path_str(c_state_path);
+    env->ReleaseStringUTFChars(statePath, c_state_path);
+
+    bool result = g_towns->LoadState(path_str);
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
 }

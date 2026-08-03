@@ -18,6 +18,7 @@ package com.m5dev.fminfinite;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.Rect;
 import android.util.AttributeSet;
 import android.view.SurfaceHolder;
@@ -28,6 +29,11 @@ public class EmulatorSurfaceView extends SurfaceView implements SurfaceHolder.Ca
     private int[] pixels = new int[640 * 480];
     private int[] size = new int[2];
     private Bitmap reusableBitmap = null;
+    private boolean screenFilterBilinear = false;
+
+    public void setScreenFilterBilinear(boolean bilinear) {
+        this.screenFilterBilinear = bilinear;
+    }
 
     public EmulatorSurfaceView(Context context) {
         super(context);
@@ -91,7 +97,9 @@ public class EmulatorSurfaceView extends SurfaceView implements SurfaceHolder.Ca
                 int top = (viewHeight - scaledHeight) / 2;
 
                 Rect destRect = new Rect(left, top, left + scaledWidth, top + scaledHeight);
-                canvas.drawBitmap(reusableBitmap, null, destRect, null);
+                Paint paint = new Paint();
+                paint.setFilterBitmap(screenFilterBilinear);
+                canvas.drawBitmap(reusableBitmap, null, destRect, paint);
             } finally {
                 holder.unlockCanvasAndPost(canvas);
             }
