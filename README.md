@@ -80,4 +80,4 @@ See [CREDITS.md](CREDITS.md) for full credits.
 
 ---
 
-*Developed with ❤️ by [M5Devs](https://github.com/M5Devs) 🇪🇬*
+*Developed with ❤️ by [M5 Dev](https://github.com/M5Devs) 🇪🇬*
