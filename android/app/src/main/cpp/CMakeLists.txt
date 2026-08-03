@@ -4,13 +4,10 @@
 # Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 #
 # 1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-#
 # 2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-#
 # 3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
 #
-# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
 # << LICENSE
 
 cmake_minimum_required(VERSION 3.22.1)
@@ -19,7 +16,6 @@ project(FMINFINITE_CORE)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Definitions from the original CMakeLists.txt
 add_compile_definitions(YS_LITTLE_ENDIAN)
 add_compile_definitions(YS_TWOS_COMPLEMENT)
 
@@ -108,6 +104,12 @@ set(CORE_SOURCES
     # d77
     "${CORE_ROOT}/externals/d77/d77.cpp"
     "${CORE_ROOT}/externals/d77/d77ext.cpp"
+
+    # ← ده اللي كان ناقص! YsSoundPlayer
+    "${CORE_ROOT}/externals/yssimplesound/src/yssimplesound.cpp"
+
+    # ← ده اللي كان ناقص! YsPng
+    "${CORE_ROOT}/externals/yspng/yspngenc.cpp"
 
     # I8251 to Socket & Yssocket
     "${CORE_ROOT}/i8251_to_socket/i8251tosocket.cpp"
@@ -284,7 +286,6 @@ target_include_directories(fminfinite_core PRIVATE
     "${CORE_ROOT}/main_cui/command"
 )
 
-# Link against android, log, OpenSLES, EGL, GLESv2 as requested
 target_link_libraries(fminfinite_core
     android
     log
