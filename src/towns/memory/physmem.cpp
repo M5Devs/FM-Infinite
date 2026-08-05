@@ -22,6 +22,9 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include "i486.h"
 #include "i486debug.h"
 
+std::string GetBIOSFileMapping(const std::string &dirName, const std::string &defaultFileName);
+void write_to_log(const char *format, ...);
+
 
 void TownsPhysicalMemory::KanjiROMAccess::Reset()
 {
@@ -389,35 +392,36 @@ std::vector <unsigned char> TownsPhysicalMemory::LoadROMImage(std::string fName,
 bool TownsPhysicalMemory::LoadROMImages(std::string dirName,bool verbose)
 {
 	std::string fName;
-	fName=cpputil::MakeFullPathName(dirName,"FMT_SYS.ROM");
+	fName=GetBIOSFileMapping(dirName,"FMT_SYS.ROM");
 	sysRom=LoadROMImage(fName,verbose);
+	write_to_log("Loading BIOS: FMT_SYS.ROM, size: %d bytes", (int)sysRom.size());
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_DOS.ROM");
+	fName=GetBIOSFileMapping(dirName,"FMT_DOS.ROM");
 	dosRom=LoadROMImage(fName,verbose);
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_FNT.ROM");
+	fName=GetBIOSFileMapping(dirName,"FMT_FNT.ROM");
 	fontRom=LoadROMImage(fName,verbose);
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_F20.ROM");
+	fName=GetBIOSFileMapping(dirName,"FMT_F20.ROM");
 	font20Rom=LoadROMImage(fName,verbose);
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_DIC.ROM");
+	fName=GetBIOSFileMapping(dirName,"FMT_DIC.ROM");
 	dicRom=LoadROMImage(fName,verbose);
 
-	fName=cpputil::MakeFullPathName(dirName,"MYTOWNS.ROM");
+	fName=GetBIOSFileMapping(dirName,"MYTOWNS.ROM");
 	std::vector <uint8_t> serROM=LoadROMImage(fName,verbose);
 
-	fName=cpputil::MakeFullPathName(dirName,"MAR_EX0.ROM");
+	fName=GetBIOSFileMapping(dirName,"MAR_EX0.ROM");
 	std::vector <uint8_t> mar0=LoadROMImage(fName,verbose);
-	fName=cpputil::MakeFullPathName(dirName,"MAR_EX1.ROM");
+	fName=GetBIOSFileMapping(dirName,"MAR_EX1.ROM");
 	std::vector <uint8_t> mar1=LoadROMImage(fName,verbose);
-	fName=cpputil::MakeFullPathName(dirName,"MAR_EX2.ROM");
+	fName=GetBIOSFileMapping(dirName,"MAR_EX2.ROM");
 	std::vector <uint8_t> mar2=LoadROMImage(fName,verbose);
-	fName=cpputil::MakeFullPathName(dirName,"MAR_EX3.ROM");
+	fName=GetBIOSFileMapping(dirName,"MAR_EX3.ROM");
 	std::vector <uint8_t> mar3=LoadROMImage(fName,verbose);
 
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_ALL.ROM");
+	fName=GetBIOSFileMapping(dirName,"FMT_ALL.ROM");
 	auto allRoms=LoadROMImage(fName,verbose);
 	if(0<allRoms.size())
 	{

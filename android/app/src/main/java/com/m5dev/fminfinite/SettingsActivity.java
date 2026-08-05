@@ -37,6 +37,7 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.view.WindowCompat;
@@ -55,6 +56,7 @@ public class SettingsActivity extends AppCompatActivity {
     // UI elements to update dynamically
     private TextView gamePathSubtext;
     private TextView biosPathSubtext;
+    private TextView biosTypeSubtext;
     private TextView opacityValueText;
     private TextView sizeValueText;
 
@@ -127,6 +129,15 @@ public class SettingsActivity extends AppCompatActivity {
         biosFolderCard.addView(biosTitle);
         biosFolderCard.addView(biosPathSubtext);
         rootContainer.addView(biosFolderCard);
+
+        // BIOS Type Override Card
+        LinearLayout biosTypeCard = createSettingCard();
+        biosTypeCard.setOnClickListener(v -> showBiosTypeDialog());
+        TextView biosTypeTitle = createSettingTitle("BIOS Type");
+        biosTypeSubtext = createSettingSubtext("Auto-Detect");
+        biosTypeCard.addView(biosTypeTitle);
+        biosTypeCard.addView(biosTypeSubtext);
+        rootContainer.addView(biosTypeCard);
 
         // --- SECTION 2: DISPLAY ---
         addSectionHeader(getString(R.string.section_display));
@@ -397,6 +408,40 @@ public class SettingsActivity extends AppCompatActivity {
         return tv;
     }
 
+    private void showBiosTypeDialog() {
+        String[] options = {"Auto-Detect (default)", "FM Towns (PC)", "FM Towns Marty", "Custom (advanced)"};
+        final BIOSFileMapper.Mode[] modes = {
+            BIOSFileMapper.Mode.AUTO,
+            BIOSFileMapper.Mode.PC,
+            BIOSFileMapper.Mode.MARTY,
+            BIOSFileMapper.Mode.CUSTOM
+        };
+
+        int selectedIndex = 0;
+        String currentModeStr = prefs.getString(BIOSFileMapper.KEY_BIOS_TYPE, "auto");
+        for (int i = 0; i < modes.length; i++) {
+            if (modes[i].getValue().equals(currentModeStr)) {
+                selectedIndex = i;
+                break;
+            }
+        }
+
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle("Select BIOS Type")
+                .setSingleChoiceItems(options, selectedIndex, (dialog, which) -> {
+                    prefs.edit().putString(BIOSFileMapper.KEY_BIOS_TYPE, modes[which].getValue()).apply();
+                    dialog.dismiss();
+                    updateFolderPaths();
+
+                    BIOSFileMapper.BIOSStatus status = BIOSFileMapper.getStatus(this);
+                    if (!status.isOK) {
+                        Toast.makeText(this, "Warning: Missing required files for selected BIOS mode!", Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
     private void updateFolderPaths() {
         Uri rootUri = StorageHelper.getPersistedUri(this);
         File localRoot = getExternalFilesDir(null);
@@ -408,10 +453,32 @@ public class SettingsActivity extends AppCompatActivity {
                 displayedPath = displayedPath.substring(displayedPath.lastIndexOf(':') + 1);
             }
             gamePathSubtext.setText("SAF folder: " + displayedPath + "\nLocal synced: " + new File(localRoot, StorageHelper.SUBFOLDER_ROMS).getAbsolutePath());
-            biosPathSubtext.setText("SAF folder: " + displayedPath + "\nLocal synced: " + new File(localRoot, StorageHelper.SUBFOLDER_BIOS).getAbsolutePath());
+
+            // BIOS File Status and Warnings
+            BIOSFileMapper.BIOSStatus status = BIOSFileMapper.getStatus(this);
+            String biosDetails = "SAF folder: " + displayedPath + "\nLocal synced: " + new File(localRoot, StorageHelper.SUBFOLDER_BIOS).getAbsolutePath();
+
+            if (status.hasDeprecated) {
+                biosDetails += "\n⚠️ TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.";
+            }
+            if (!status.isOK) {
+                biosDetails += "\n❌ Incomplete BIOS. Missing: " + status.missingFiles.toString();
+            } else {
+                biosDetails += "\n✅ BIOS Status: OK (" + status.statusMessage + ")";
+            }
+            biosPathSubtext.setText(biosDetails);
+
+            // Update biosTypeSubtext
+            String configModeCap = capitalize(status.configuredMode.getValue());
+            if (status.configuredMode == BIOSFileMapper.Mode.AUTO) {
+                biosTypeSubtext.setText("Auto-Detect (Active: " + status.statusMessage + ")");
+            } else {
+                biosTypeSubtext.setText(configModeCap);
+            }
         } else {
             gamePathSubtext.setText("Tap to choose storage folder");
             biosPathSubtext.setText("Tap to choose storage folder");
+            biosTypeSubtext.setText("Auto-Detect");
         }
     }
 

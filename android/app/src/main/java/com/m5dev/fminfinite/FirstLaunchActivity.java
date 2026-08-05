@@ -208,25 +208,32 @@ public class FirstLaunchActivity extends AppCompatActivity {
         StorageHelper.persistUriPermission(this, uri);
         StorageHelper.syncStorage(this, uri);
 
-        // Check if BIOS folder is empty in local files
-        File localRoot = getExternalFilesDir(null);
-        if (localRoot == null) localRoot = getFilesDir();
-        File biosDir = new File(localRoot, StorageHelper.SUBFOLDER_BIOS);
-        File[] biosFiles = biosDir.listFiles();
+        BIOSFileMapper.BIOSStatus status = BIOSFileMapper.getStatus(this);
 
-        boolean isBiosEmpty = (biosFiles == null || biosFiles.length == 0);
-
-        if (isBiosEmpty) {
-            // Show warning dialog as required
+        if (status.hasDeprecated) {
             new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
-                    .setTitle("BIOS Files Missing")
-                    .setMessage(getString(R.string.bios_warning))
+                    .setTitle("Deprecated BIOS Found")
+                    .setMessage("TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.")
+                    .setCancelable(false)
+                    .setPositiveButton("OK", (dialog, which) -> {
+                        finalizeSetup();
+                    })
+                    .show();
+        } else if (!status.isOK) {
+            String missingMsg = "Please add FMT_SYS.ROM and FMT_FNT.ROM from https://github.com/Abdess/retrobios\n\nMissing: " + status.missingFiles.toString();
+            if (status.fileCount == 0) {
+                missingMsg = "Please add BIOS files from https://github.com/Abdess/retrobios";
+            }
+            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                    .setTitle("BIOS Files Missing/Incomplete")
+                    .setMessage(missingMsg)
                     .setCancelable(false)
                     .setPositiveButton("OK", (dialog, which) -> {
                         finalizeSetup();
                     })
                     .show();
         } else {
+            Toast.makeText(this, "Detected: " + status.statusMessage + " (" + status.fileCount + " files)", Toast.LENGTH_LONG).show();
             finalizeSetup();
         }
     }

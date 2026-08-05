@@ -32,12 +32,35 @@ FM Infinite brings the Fujitsu FM Towns — a legendary Japanese home computer f
 4. Place your game images in the `roms/` folder
 5. Launch a game from the library
 
-### Required BIOS Files
-```
-bios/
-├── TOWNS.SYS
-└── TOWNSCRD.SYS
-```
+## BIOS Setup
+
+FM Infinite requires FM Towns BIOS ROM files.
+
+### Download BIOS:
+Get the latest BIOS collection from: https://github.com/Abdess/retrobios
+
+### Required Files:
+Create a `bios/` folder and copy these files:
+
+| File | Required | Description |
+|------|----------|-------------|
+| FMT_SYS.ROM | ✅ Yes | System BIOS |
+| FMT_FNT.ROM | ✅ Yes | Font/Character ROM |
+| FMT_DIC.ROM | ❌ No | Dictionary ROM |
+| FMT_DOS.ROM | ❌ No | DOS ROM |
+
+### Optional (FM Towns Marty):
+| File | Description |
+|------|-------------|
+| MAR_EX0.ROM | Expansion ROM 0 |
+| MAR_EX1.ROM | Expansion ROM 1 |
+| MAR_EX2.ROM | Expansion ROM 2 |
+| MAR_EX3.ROM | Expansion ROM 3 |
+
+### Note:
+- TOWNS.SYS is deprecated and no longer supported
+- Use FMT_SYS.ROM from the retrobios collection
+- Files are case-sensitive on some devices
 
 ## 🏗️ Building from Source
 
