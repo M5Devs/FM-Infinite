@@ -74,6 +74,8 @@ public class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: SettingsActivity onCreate called");
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);

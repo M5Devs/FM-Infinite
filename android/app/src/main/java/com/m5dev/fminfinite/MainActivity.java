@@ -123,6 +123,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: MainActivity onCreate called");
 
         // Check if first launch
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);

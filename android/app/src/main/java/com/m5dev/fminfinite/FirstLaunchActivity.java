@@ -58,6 +58,8 @@ public class FirstLaunchActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: FirstLaunchActivity onCreate called");
 
         // Check if first launch flag is already false
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
