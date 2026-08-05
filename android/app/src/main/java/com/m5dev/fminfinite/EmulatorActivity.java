@@ -24,6 +24,8 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.SystemClock;
 import android.util.Log;
 import android.util.TypedValue;
@@ -71,10 +73,77 @@ public class EmulatorActivity extends AppCompatActivity {
     private FrameLayout quickMenuOverlay;
 
     // Running states
-    private boolean isRunning = false;
+    private volatile boolean isRunning = false;
+    private boolean isCoreInitialized = false;
     private int currentGamepadMask = 0;
     private long fpsLastTime = 0;
     private int fpsFrameCount = 0;
+
+    private HandlerThread emuThread;
+    private Handler emuHandler;
+    private final Runnable emuRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isRunning) {
+                long startTime = SystemClock.elapsedRealtime();
+
+                EmulatorCore.nativeRunFrame();
+                if (surfaceView != null) {
+                    surfaceView.drawFrame();
+                }
+
+                fpsFrameCount++;
+                long now = SystemClock.elapsedRealtime();
+                long diff = now - fpsLastTime;
+                if (diff >= 1000) {
+                    final int calculatedFps = Math.round((float) fpsFrameCount * 1000.0f / diff);
+                    runOnUiThread(() -> {
+                        if (fpsCounterText != null) {
+                            fpsCounterText.setText(calculatedFps + " FPS");
+                        }
+                    });
+                    fpsLastTime = now;
+                    fpsFrameCount = 0;
+                }
+
+                long elapsed = SystemClock.elapsedRealtime() - startTime;
+                long delay = Math.max(0, 16 - elapsed);
+                if (emuHandler != null) {
+                    emuHandler.postDelayed(this, delay);
+                }
+            }
+        }
+    };
+
+    private synchronized void startEmuThread() {
+        if (emuThread == null) {
+            emuThread = new HandlerThread("FMInfinite_EmuThread");
+            emuThread.start();
+            emuHandler = new Handler(emuThread.getLooper());
+        }
+        isRunning = true;
+        fpsLastTime = SystemClock.elapsedRealtime();
+        fpsFrameCount = 0;
+        emuHandler.removeCallbacks(emuRunnable);
+        emuHandler.post(emuRunnable);
+    }
+
+    private synchronized void stopEmuThread() {
+        isRunning = false;
+        if (emuHandler != null) {
+            emuHandler.removeCallbacks(emuRunnable);
+        }
+        if (emuThread != null) {
+            emuThread.quit();
+            try {
+                emuThread.join(1000);
+            } catch (InterruptedException e) {
+                Log.e(TAG, "stopEmuThread interrupted", e);
+            }
+            emuThread = null;
+            emuHandler = null;
+        }
+    }
 
     // Keyboard State (0 = hidden, 1 = Basic, 2 = Full)
     private int keyboardState = 0;
@@ -858,60 +927,64 @@ public class EmulatorActivity extends AppCompatActivity {
     }
 
     private void initCoreAndLoad() {
+        if (gamePath == null) {
+            Log.e(TAG, "initCoreAndLoad: gamePath is null!");
+            Toast.makeText(this, "Game path is invalid.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
         File localRoot = getExternalFilesDir(null);
-        if (localRoot == null) localRoot = getFilesDir();
+        if (localRoot == null) {
+            localRoot = getFilesDir();
+        }
+        if (localRoot == null) {
+            Log.e(TAG, "initCoreAndLoad: External and internal files directories are null!");
+            return;
+        }
 
         File biosDir = new File(localRoot, StorageHelper.SUBFOLDER_BIOS);
         File romsDir = new File(localRoot, StorageHelper.SUBFOLDER_ROMS);
 
-        if (!biosDir.exists()) biosDir.mkdirs();
-        if (!romsDir.exists()) romsDir.mkdirs();
+        if (!biosDir.exists()) {
+            if (!biosDir.mkdirs()) {
+                Log.e(TAG, "initCoreAndLoad: Failed to create bios directory: " + biosDir.getAbsolutePath());
+            }
+        }
+        if (!romsDir.exists()) {
+            if (!romsDir.mkdirs()) {
+                Log.e(TAG, "initCoreAndLoad: Failed to create roms directory: " + romsDir.getAbsolutePath());
+            }
+        }
 
+        Log.i(TAG, "initCoreAndLoad: Initializing emulator core...");
         boolean inited = EmulatorCore.nativeInit(biosDir.getAbsolutePath(), romsDir.getAbsolutePath());
-        if (inited) {
-            Log.i(TAG, "Core initialized successfully.");
-            boolean loaded = EmulatorCore.nativeLoadROM(gamePath);
+        if (!inited) {
+            Log.e(TAG, "initCoreAndLoad: Emulator core initialization failed.");
+            Toast.makeText(this, "Core Setup failed. Ensure you copied your FM Towns BIOS ROMs to the bios/ folder.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        Log.i(TAG, "initCoreAndLoad: Core initialized successfully. Loading game: " + gamePath);
+        boolean loaded = false;
+        if (gamePath.toLowerCase().endsWith(".iso") || gamePath.toLowerCase().endsWith(".mds") || gamePath.toLowerCase().endsWith(".cue") || gamePath.toLowerCase().endsWith(".chd")) {
+            loaded = EmulatorCore.nativeLoadDisc(gamePath);
+        } else {
+            loaded = EmulatorCore.nativeLoadROM(gamePath);
             if (!loaded) {
                 loaded = EmulatorCore.nativeLoadDisc(gamePath);
             }
-            if (loaded) {
-                Log.i(TAG, "Game loaded successfully: " + gamePath);
-            } else {
-                Toast.makeText(this, "Failed to load game image.", Toast.LENGTH_LONG).show();
-            }
-        } else {
-            Toast.makeText(this, "Core Setup failed. Ensure you copied your FM Towns BIOS ROMs to the bios/ folder.", Toast.LENGTH_LONG).show();
         }
 
-        if (!isRunning) {
-            isRunning = true;
-            fpsLastTime = SystemClock.elapsedRealtime();
-            fpsFrameCount = 0;
-            Choreographer.getInstance().postFrameCallback(frameCallback);
+        if (!loaded) {
+            Log.e(TAG, "initCoreAndLoad: Failed to load game: " + gamePath);
+            Toast.makeText(this, "Failed to load game image.", Toast.LENGTH_LONG).show();
+            return;
         }
+
+        Log.i(TAG, "initCoreAndLoad: Game loaded successfully. Starting background emulator thread.");
+        isCoreInitialized = true;
+        startEmuThread();
     }
-
-    private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
-        @Override
-        public void doFrame(long frameTimeNanos) {
-            if (isRunning) {
-                EmulatorCore.nativeRunFrame();
-                surfaceView.drawFrame();
-
-                fpsFrameCount++;
-                long now = SystemClock.elapsedRealtime();
-                long diff = now - fpsLastTime;
-                if (diff >= 1000) {
-                    final int calculatedFps = Math.round((float) fpsFrameCount * 1000.0f / diff);
-                    fpsCounterText.setText(calculatedFps + " FPS");
-                    fpsLastTime = now;
-                    fpsFrameCount = 0;
-                }
-
-                Choreographer.getInstance().postFrameCallback(this);
-            }
-        }
-    };
 
     private void showExitConfirmation() {
         if (isMenuOpen) toggleQuickMenu();
@@ -926,7 +999,7 @@ public class EmulatorActivity extends AppCompatActivity {
     }
 
     private void exitEmulator() {
-        isRunning = false;
+        stopEmuThread();
         EmulatorCore.nativeShutdown();
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
@@ -943,7 +1016,7 @@ public class EmulatorActivity extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        isRunning = false;
+        stopEmuThread();
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
             StorageHelper.syncLocalSavesToSAF(this, storageUri);
@@ -963,16 +1036,21 @@ public class EmulatorActivity extends AppCompatActivity {
         if (virtualPadContainer != null) {
             virtualPadContainer.setAlpha(virtualPadOpacity);
         }
-        isRunning = true;
-        fpsLastTime = SystemClock.elapsedRealtime();
-        fpsFrameCount = 0;
-        Choreographer.getInstance().postFrameCallback(frameCallback);
+        if (isCoreInitialized) {
+            startEmuThread();
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        // Do nothing to prevent activity restart on rotation
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        isRunning = false;
+        stopEmuThread();
         EmulatorCore.nativeShutdown();
     }
 
