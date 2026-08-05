@@ -13,6 +13,12 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 << LICENSE */
 #include <iostream>
+#include <string>
+
+std::string g_sys_rom_name = "FMT_SYS.ROM";
+std::string g_dos_rom_name = "FMT_DOS.ROM";
+std::string g_font_rom_name = "FMT_FNT.ROM";
+std::string g_dic_rom_name = "FMT_DIC.ROM";
 
 #include "physmem.h"
 #include "ramrom.h"
@@ -389,20 +395,28 @@ std::vector <unsigned char> TownsPhysicalMemory::LoadROMImage(std::string fName,
 bool TownsPhysicalMemory::LoadROMImages(std::string dirName,bool verbose)
 {
 	std::string fName;
-	fName=cpputil::MakeFullPathName(dirName,"FMT_SYS.ROM");
-	sysRom=LoadROMImage(fName,verbose);
+	if (!g_sys_rom_name.empty()) {
+		fName=cpputil::MakeFullPathName(dirName,g_sys_rom_name);
+		sysRom=LoadROMImage(fName,verbose);
+	}
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_DOS.ROM");
-	dosRom=LoadROMImage(fName,verbose);
+	if (!g_dos_rom_name.empty()) {
+		fName=cpputil::MakeFullPathName(dirName,g_dos_rom_name);
+		dosRom=LoadROMImage(fName,verbose);
+	}
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_FNT.ROM");
-	fontRom=LoadROMImage(fName,verbose);
+	if (!g_font_rom_name.empty()) {
+		fName=cpputil::MakeFullPathName(dirName,g_font_rom_name);
+		fontRom=LoadROMImage(fName,verbose);
+	}
 
 	fName=cpputil::MakeFullPathName(dirName,"FMT_F20.ROM");
 	font20Rom=LoadROMImage(fName,verbose);
 
-	fName=cpputil::MakeFullPathName(dirName,"FMT_DIC.ROM");
-	dicRom=LoadROMImage(fName,verbose);
+	if (!g_dic_rom_name.empty()) {
+		fName=cpputil::MakeFullPathName(dirName,g_dic_rom_name);
+		dicRom=LoadROMImage(fName,verbose);
+	}
 
 	fName=cpputil::MakeFullPathName(dirName,"MYTOWNS.ROM");
 	std::vector <uint8_t> serROM=LoadROMImage(fName,verbose);

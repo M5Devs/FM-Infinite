@@ -72,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
     // Layout elements
     private LinearLayout rootLayout;
     private RelativeLayout toolbarLayout;
+    private TextView biosModeBadge;
     private LinearLayout searchBarContainer;
     private EditText searchEditText;
     private LinearLayout tabsContainer;
@@ -123,6 +124,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: MainActivity onCreate called");
 
         // Check if first launch
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -172,6 +175,88 @@ public class MainActivity extends AppCompatActivity {
         refreshLibrary();
     }
 
+    private static boolean hasShownBiosToast = false;
+
+    private void checkBIOSFiles() {
+        File biosDir = BIOSFileMapper.getLocalBIOSDir(this);
+        String settingMode = BIOSFileMapper.getBIOSSettingMode(this);
+
+        List<String> missingFiles = BIOSFileMapper.getMissingBIOSFiles(this);
+
+        if (BIOSFileMapper.MODE_AUTO.equals(settingMode)) {
+            boolean hasPc = BIOSFileMapper.hasFileIgnoreCase(biosDir, "TOWNS.SYS") && BIOSFileMapper.hasFileIgnoreCase(biosDir, "TOWNSCRD.SYS");
+            boolean hasMarty = BIOSFileMapper.hasFileIgnoreCase(biosDir, "fmt_sys.rom") && BIOSFileMapper.hasFileIgnoreCase(biosDir, "fmt_fnt.rom");
+
+            if (hasPc) {
+                if (!hasShownBiosToast) {
+                    Toast.makeText(this, "Detected: FM Towns PC BIOS", Toast.LENGTH_SHORT).show();
+                    hasShownBiosToast = true;
+                }
+            } else if (hasMarty) {
+                if (!hasShownBiosToast) {
+                    Toast.makeText(this, "Detected: FM Towns Marty BIOS", Toast.LENGTH_SHORT).show();
+                    hasShownBiosToast = true;
+                }
+            } else {
+                File[] files = biosDir.listFiles();
+                if (files == null || files.length == 0) {
+                    showBIOSDialog("Please add BIOS files", "No BIOS files were found in your bios/ folder.\n\nPlease select your storage folder or copy TOWNS.SYS and TOWNSCRD.SYS (for PC mode) or fmt_sys.rom and fmt_fnt.rom (for Marty mode) to the bios/ folder.");
+                } else {
+                    boolean hasSomePc = BIOSFileMapper.hasFileIgnoreCase(biosDir, "TOWNS.SYS") || BIOSFileMapper.hasFileIgnoreCase(biosDir, "TOWNSCRD.SYS");
+                    boolean hasSomeMarty = BIOSFileMapper.hasFileIgnoreCase(biosDir, "fmt_sys.rom") || BIOSFileMapper.hasFileIgnoreCase(biosDir, "fmt_fnt.rom");
+
+                    if (hasSomePc || hasSomeMarty) {
+                        StringBuilder sb = new StringBuilder();
+                        for (String m : missingFiles) {
+                            sb.append("- ").append(m).append("\n");
+                        }
+                        showBIOSDialog("Missing BIOS Files", "The detected BIOS files are incomplete. Please add the following missing files to the bios/ folder:\n\n" + sb.toString());
+                    } else {
+                        showUnsupportedBIOSDialog();
+                    }
+                }
+            }
+        } else {
+            if (!missingFiles.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                for (String m : missingFiles) {
+                    sb.append("- ").append(m).append("\n");
+                }
+                showBIOSDialog("Missing BIOS Files", "The selected manual BIOS type (" + capitalize(settingMode) + ") is missing the following required files:\n\n" + sb.toString());
+            } else {
+                if (!hasShownBiosToast) {
+                    Toast.makeText(this, "Detected: FM Towns " + (BIOSFileMapper.MODE_PC.equals(settingMode) ? "PC" : capitalize(settingMode)) + " BIOS", Toast.LENGTH_SHORT).show();
+                    hasShownBiosToast = true;
+                }
+            }
+        }
+    }
+
+    private void showBIOSDialog(String title, String message) {
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle(title)
+                .setMessage(message)
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
+    private void showUnsupportedBIOSDialog() {
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle("Unsupported BIOS format")
+                .setMessage("The files in your bios/ folder are of an unsupported format.\n\nFor help configuring BIOS, please visit the FM Infinite GitHub page.")
+                .setPositiveButton("Help Link", (dialog, which) -> {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/M5Devs/FM-Infinite"));
+                    startActivity(intent);
+                })
+                .setNegativeButton("OK", null)
+                .show();
+    }
+
+    private String capitalize(String str) {
+        if (str == null || str.isEmpty()) return "";
+        return Character.toUpperCase(str.charAt(0)) + str.substring(1);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
@@ -181,6 +266,13 @@ public class MainActivity extends AppCompatActivity {
             StorageHelper.syncStorage(this, storageUri);
         }
         refreshLibrary();
+
+        // Check BIOS files and update mode badge
+        checkBIOSFiles();
+        if (biosModeBadge != null) {
+            String activeBios = BIOSFileMapper.getActiveBIOSMode(this);
+            biosModeBadge.setText(activeBios.equalsIgnoreCase("pc") ? "PC Mode" : "Marty Mode");
+        }
     }
 
     private void setupToolbar() {
@@ -209,6 +301,31 @@ public class MainActivity extends AppCompatActivity {
         logoText.setLayoutParams(logoParams);
         toolbarLayout.addView(logoText);
 
+        // BIOS Mode Badge in status/toolbar
+        biosModeBadge = new TextView(this);
+        biosModeBadge.setId(View.generateViewId());
+        String activeBios = BIOSFileMapper.getActiveBIOSMode(this);
+        biosModeBadge.setText(activeBios.equalsIgnoreCase("pc") ? "PC Mode" : "Marty Mode");
+        biosModeBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        biosModeBadge.setTextColor(Color.parseColor("#80E0E0FF"));
+        biosModeBadge.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
+
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setColor(Color.parseColor("#222432"));
+        badgeBg.setCornerRadius(dpToPx(4));
+        badgeBg.setStroke(dpToPx(1), Color.parseColor("#3B3D4A"));
+        biosModeBadge.setBackground(badgeBg);
+
+        RelativeLayout.LayoutParams badgeParams = new RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        badgeParams.addRule(RelativeLayout.RIGHT_OF, logoText.getId());
+        badgeParams.addRule(RelativeLayout.CENTER_VERTICAL);
+        badgeParams.leftMargin = dpToPx(8);
+        biosModeBadge.setLayoutParams(badgeParams);
+        toolbarLayout.addView(biosModeBadge);
+
         // Search Bar Container (Initially Hidden)
         searchBarContainer = new LinearLayout(this);
         searchBarContainer.setOrientation(LinearLayout.HORIZONTAL);
@@ -218,7 +335,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        searchParams.addRule(RelativeLayout.RIGHT_OF, logoText.getId());
+        searchParams.addRule(RelativeLayout.RIGHT_OF, biosModeBadge.getId());
         searchParams.addRule(RelativeLayout.LEFT_OF, View.generateViewId()); // will anchor to settings below
         searchParams.addRule(RelativeLayout.CENTER_VERTICAL);
         searchParams.leftMargin = dpToPx(16);

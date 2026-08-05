@@ -58,6 +58,8 @@ public class FirstLaunchActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: FirstLaunchActivity onCreate called");
 
         // Check if first launch flag is already false
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -206,27 +208,42 @@ public class FirstLaunchActivity extends AppCompatActivity {
         StorageHelper.persistUriPermission(this, uri);
         StorageHelper.syncStorage(this, uri);
 
-        // Check if BIOS folder is empty in local files
         File localRoot = getExternalFilesDir(null);
         if (localRoot == null) localRoot = getFilesDir();
         File biosDir = new File(localRoot, StorageHelper.SUBFOLDER_BIOS);
         File[] biosFiles = biosDir.listFiles();
+        int fileCount = (biosFiles != null) ? biosFiles.length : 0;
 
-        boolean isBiosEmpty = (biosFiles == null || biosFiles.length == 0);
+        String activeMode = BIOSFileMapper.getActiveBIOSMode(this);
+        String detectedType = "Unknown / Incomplete";
 
-        if (isBiosEmpty) {
-            // Show warning dialog as required
-            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
-                    .setTitle("BIOS Files Missing")
-                    .setMessage(getString(R.string.bios_warning))
-                    .setCancelable(false)
-                    .setPositiveButton("OK", (dialog, which) -> {
-                        finalizeSetup();
-                    })
-                    .show();
-        } else {
-            finalizeSetup();
+        boolean hasPc = BIOSFileMapper.hasFileIgnoreCase(biosDir, "TOWNS.SYS") && BIOSFileMapper.hasFileIgnoreCase(biosDir, "TOWNSCRD.SYS");
+        boolean hasMarty = BIOSFileMapper.hasFileIgnoreCase(biosDir, "fmt_sys.rom") && BIOSFileMapper.hasFileIgnoreCase(biosDir, "fmt_fnt.rom");
+
+        if (hasPc) {
+            detectedType = "FM Towns (PC)";
+        } else if (hasMarty) {
+            detectedType = "FM Towns Marty";
         }
+
+        String msg = "Folder synchronization complete.\n\n" +
+                     "Detected BIOS Type: " + detectedType + "\n" +
+                     "BIOS Files Found: " + fileCount + "\n\n";
+
+        if (!hasPc && !hasMarty) {
+            msg += "Warning: No complete BIOS set was detected. Please ensure you have copied TOWNS.SYS + TOWNSCRD.SYS (for PC mode) or fmt_sys.rom + fmt_fnt.rom (for Marty mode) to the bios/ folder.";
+        } else {
+            msg += "Your BIOS files were detected and matched successfully!";
+        }
+
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle("BIOS Setup Status")
+                .setMessage(msg)
+                .setCancelable(false)
+                .setPositiveButton("OK", (dialog, which) -> {
+                    finalizeSetup();
+                })
+                .show();
     }
 
     private void finalizeSetup() {

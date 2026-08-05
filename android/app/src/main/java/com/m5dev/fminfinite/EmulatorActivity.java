@@ -158,6 +158,8 @@ public class EmulatorActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: EmulatorActivity onCreate called");
 
         // Keep screen on
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -945,6 +947,8 @@ public class EmulatorActivity extends AppCompatActivity {
         File biosDir = new File(localRoot, StorageHelper.SUBFOLDER_BIOS);
         File romsDir = new File(localRoot, StorageHelper.SUBFOLDER_ROMS);
 
+        FileLogger.log("Java: BIOS loading starting from directory: " + biosDir.getAbsolutePath());
+
         if (!biosDir.exists()) {
             if (!biosDir.mkdirs()) {
                 Log.e(TAG, "initCoreAndLoad: Failed to create bios directory: " + biosDir.getAbsolutePath());
@@ -957,7 +961,20 @@ public class EmulatorActivity extends AppCompatActivity {
         }
 
         Log.i(TAG, "initCoreAndLoad: Initializing emulator core...");
+        FileLogger.log("Java: EmulatorCore init starting...");
+        EmulatorCore.nativeSetLogFilePath(FileLogger.getLogFilePath());
+
+        String activeBiosMode = BIOSFileMapper.getActiveBIOSMode(this);
+        EmulatorCore.nativeSetBIOSMode(activeBiosMode);
+        EmulatorCore.nativeSetBIOSFileMapping(
+                BIOSFileMapper.getMappedSys(this),
+                BIOSFileMapper.getMappedFnt(this),
+                BIOSFileMapper.getMappedDos(this),
+                BIOSFileMapper.getMappedDic(this)
+        );
+
         boolean inited = EmulatorCore.nativeInit(biosDir.getAbsolutePath(), romsDir.getAbsolutePath());
+        FileLogger.log("Java: EmulatorCore init finished with result: " + inited);
         if (!inited) {
             Log.e(TAG, "initCoreAndLoad: Emulator core initialization failed.");
             Toast.makeText(this, "Core Setup failed. Ensure you copied your FM Towns BIOS ROMs to the bios/ folder.", Toast.LENGTH_LONG).show();
@@ -965,6 +982,7 @@ public class EmulatorActivity extends AppCompatActivity {
         }
 
         Log.i(TAG, "initCoreAndLoad: Core initialized successfully. Loading game: " + gamePath);
+        FileLogger.log("Java: Loading game: " + gamePath);
         boolean loaded = false;
         if (gamePath.toLowerCase().endsWith(".iso") || gamePath.toLowerCase().endsWith(".mds") || gamePath.toLowerCase().endsWith(".cue") || gamePath.toLowerCase().endsWith(".chd")) {
             loaded = EmulatorCore.nativeLoadDisc(gamePath);

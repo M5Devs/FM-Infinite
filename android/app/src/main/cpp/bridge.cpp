@@ -21,6 +21,8 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include <chrono>
 #include <algorithm>
 #include <cstring>
+#include <stdarg.h>
+#include <cstdio>
 
 #include "towns.h"
 #include "townsthread.h"
@@ -172,14 +174,86 @@ static AndroidWindowInterface *g_window = nullptr;
 static AndroidSound *g_sound = nullptr;
 static std::mutex g_vm_mutex;
 static std::string g_rom_dir;
+static std::string g_log_file_path;
+
+static void write_to_log(const char *format, ...)
+{
+    if (g_log_file_path.empty()) return;
+    FILE *f = fopen(g_log_file_path.c_str(), "a");
+    if (f) {
+        va_list args;
+        va_start(args, format);
+        vfprintf(f, format, args);
+        fprintf(f, "\n");
+        va_end(args);
+        fclose(f);
+    }
+}
+
+extern std::string g_sys_rom_name;
+extern std::string g_dos_rom_name;
+extern std::string g_font_rom_name;
+extern std::string g_dic_rom_name;
+
+static std::string g_bios_mode = "Auto-Detect";
 
 extern "C" {
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSFileMapping(JNIEnv *env, jclass clazz, jstring sysName, jstring fontName, jstring dosName, jstring dicName)
+{
+    if (sysName) {
+        const char *c_sys = env->GetStringUTFChars(sysName, nullptr);
+        g_sys_rom_name = c_sys;
+        env->ReleaseStringUTFChars(sysName, c_sys);
+    }
+    if (fontName) {
+        const char *c_font = env->GetStringUTFChars(fontName, nullptr);
+        g_font_rom_name = c_font;
+        env->ReleaseStringUTFChars(fontName, c_font);
+    }
+    if (dosName) {
+        const char *c_dos = env->GetStringUTFChars(dosName, nullptr);
+        g_dos_rom_name = c_dos;
+        env->ReleaseStringUTFChars(dosName, c_dos);
+    } else {
+        g_dos_rom_name = "";
+    }
+    if (dicName) {
+        const char *c_dic = env->GetStringUTFChars(dicName, nullptr);
+        g_dic_rom_name = c_dic;
+        env->ReleaseStringUTFChars(dicName, c_dic);
+    } else {
+        g_dic_rom_name = "";
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSMode(JNIEnv *env, jclass clazz, jstring mode)
+{
+    if (mode) {
+        const char *c_mode = env->GetStringUTFChars(mode, nullptr);
+        g_bios_mode = c_mode;
+        env->ReleaseStringUTFChars(mode, c_mode);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSetLogFilePath(JNIEnv *env, jclass clazz, jstring logFilePath)
+{
+    if (logFilePath == nullptr) return;
+    const char *c_path = env->GetStringUTFChars(logFilePath, nullptr);
+    g_log_file_path = c_path;
+    env->ReleaseStringUTFChars(logFilePath, c_path);
+    write_to_log("C++: Logger initialized on C++ side successfully.");
+}
 
 JNIEXPORT jboolean JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jstring romDir, jstring sharedDir)
 {
     std::lock_guard<std::mutex> lock(g_vm_mutex);
     LOGI("nativeInit called");
+    write_to_log("C++: nativeInit called.");
 
     if (romDir == nullptr) {
         LOGE("nativeInit: romDir is null!");
@@ -202,6 +276,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
 
     g_towns = new FMTownsWithMediumFidelityCPU();
 
+    write_to_log("C++: Configuring memory map. RAM size: 16MB, VRAM size: 2MB");
     TownsStartParameters params;
     params.ROMPath = g_rom_dir;
     params.townsType = TOWNSTYPE_2_MX;
@@ -213,7 +288,17 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
         params.sharedDir.push_back(c_shared_dir);
     }
 
+    write_to_log("C++: BIOS loading started from directory: %s", c_rom_dir);
+    write_to_log("C++: BIOS mode: %s, loading file: %s", g_bios_mode.c_str(), g_sys_rom_name.c_str());
+    if (!g_font_rom_name.empty()) {
+        write_to_log("C++: BIOS mode: %s, loading file: %s", g_bios_mode.c_str(), g_font_rom_name.c_str());
+    }
     bool setupResult = FMTownsCommon::Setup(*g_towns, g_outside_world, g_window, params);
+    if (setupResult) {
+        write_to_log("C++: BIOS loaded and core set up successfully.");
+    } else {
+        write_to_log("C++: BIOS load and core set up failed!");
+    }
 
     env->ReleaseStringUTFChars(romDir, c_rom_dir);
     if (sharedDir && c_shared_dir) {
@@ -233,6 +318,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
         return JNI_FALSE;
     }
 
+    write_to_log("C++: CPU reset / PowerOn");
     g_towns->PowerOn();
     g_window->ClearVMClosedFlag();
     LOGI("Emulator core initialized successfully");
@@ -256,7 +342,9 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadROM(JNIEnv *env, jobject thiz, 
     }
 
     const char *c_rom_path = env->GetStringUTFChars(romPath, nullptr);
+    write_to_log("C++: BIOS load / nativeLoadROM called with path: %s", c_rom_path ? c_rom_path : "null");
     bool result = g_towns->LoadROMImages(c_rom_path, true);
+    write_to_log("C++: BIOS load / nativeLoadROM result: %s", result ? "success" : "failed");
     env->ReleaseStringUTFChars(romPath, c_rom_path);
 
     return result ? JNI_TRUE : JNI_FALSE;

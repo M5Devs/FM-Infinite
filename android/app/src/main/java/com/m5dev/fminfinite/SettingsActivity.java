@@ -37,6 +37,7 @@ import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.view.WindowCompat;
@@ -55,6 +56,7 @@ public class SettingsActivity extends AppCompatActivity {
     // UI elements to update dynamically
     private TextView gamePathSubtext;
     private TextView biosPathSubtext;
+    private TextView biosTypeSubtext;
     private TextView opacityValueText;
     private TextView sizeValueText;
 
@@ -74,6 +76,8 @@ public class SettingsActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        FileLogger.init(this);
+        FileLogger.log("Java: SettingsActivity onCreate called");
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
 
         prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -125,6 +129,15 @@ public class SettingsActivity extends AppCompatActivity {
         biosFolderCard.addView(biosTitle);
         biosFolderCard.addView(biosPathSubtext);
         rootContainer.addView(biosFolderCard);
+
+        // BIOS Type Card
+        LinearLayout biosTypeCard = createSettingCard();
+        biosTypeCard.setOnClickListener(v -> showBIOSTypeSelectionDialog());
+        TextView biosTypeTitle = createSettingTitle("BIOS Type");
+        biosTypeSubtext = createSettingSubtext("Auto-Detect");
+        biosTypeCard.addView(biosTypeTitle);
+        biosTypeCard.addView(biosTypeSubtext);
+        rootContainer.addView(biosTypeCard);
 
         // --- SECTION 2: DISPLAY ---
         addSectionHeader(getString(R.string.section_display));
@@ -346,6 +359,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         // Load folder configurations
         updateFolderPaths();
+        updateBIOSTypeUI();
     }
 
     private void addSectionHeader(String sectionTitle) {
@@ -422,5 +436,123 @@ public class SettingsActivity extends AppCompatActivity {
         return (int) TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()
         );
+    }
+
+    private void showBIOSTypeSelectionDialog() {
+        final String[] items = {"Auto-Detect", "FM Towns (PC)", "FM Towns Marty", "Custom (Advanced)"};
+        final String[] modes = {BIOSFileMapper.MODE_AUTO, BIOSFileMapper.MODE_PC, BIOSFileMapper.MODE_MARTY, BIOSFileMapper.MODE_CUSTOM};
+
+        String currentMode = BIOSFileMapper.getBIOSSettingMode(this);
+        int checkedItem = 0;
+        for (int i = 0; i < modes.length; i++) {
+            if (modes[i].equals(currentMode)) {
+                checkedItem = i;
+                break;
+            }
+        }
+
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle("Select BIOS Type")
+                .setSingleChoiceItems(items, checkedItem, (dialog, which) -> {
+                    String selectedMode = modes[which];
+                    BIOSFileMapper.setBIOSSettingMode(this, selectedMode);
+                    updateBIOSTypeUI();
+                    dialog.dismiss();
+
+                    if (BIOSFileMapper.MODE_CUSTOM.equals(selectedMode)) {
+                        showCustomBIOSMappingDialog();
+                    } else {
+                        java.util.List<String> missing = BIOSFileMapper.getMissingBIOSFiles(this);
+                        if (!missing.isEmpty()) {
+                            StringBuilder sb = new StringBuilder();
+                            for (String m : missing) {
+                                sb.append("- ").append(m).append("\n");
+                            }
+                            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                                    .setTitle("Missing Files Warning")
+                                    .setMessage("Warning: The selected mode requires files that are currently missing from the bios/ folder:\n\n" + sb.toString())
+                                    .setPositiveButton("OK", null)
+                                    .show();
+                        }
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void showCustomBIOSMappingDialog() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16));
+
+        final android.widget.EditText sysInput = new android.widget.EditText(this);
+        sysInput.setHint("System BIOS Filename (e.g., TOWNS.SYS)");
+        sysInput.setText(BIOSFileMapper.getCustomSys(this));
+        layout.addView(sysInput);
+
+        final android.widget.EditText fntInput = new android.widget.EditText(this);
+        fntInput.setHint("Character ROM Filename (e.g., TOWNSCRD.SYS)");
+        fntInput.setText(BIOSFileMapper.getCustomFnt(this));
+        layout.addView(fntInput);
+
+        final android.widget.EditText dosInput = new android.widget.EditText(this);
+        dosInput.setHint("DOS ROM Filename (Optional)");
+        dosInput.setText(BIOSFileMapper.getCustomDos(this));
+        layout.addView(dosInput);
+
+        final android.widget.EditText dicInput = new android.widget.EditText(this);
+        dicInput.setHint("Dictionary ROM Filename (Optional)");
+        dicInput.setText(BIOSFileMapper.getCustomDic(this));
+        layout.addView(dicInput);
+
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle("Configure Custom BIOS Files")
+                .setView(layout)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    BIOSFileMapper.setCustomSys(this, sysInput.getText().toString().trim());
+                    BIOSFileMapper.setCustomFnt(this, fntInput.getText().toString().trim());
+                    BIOSFileMapper.setCustomDos(this, dosInput.getText().toString().trim());
+                    BIOSFileMapper.setCustomDic(this, dicInput.getText().toString().trim());
+                    updateBIOSTypeUI();
+
+                    java.util.List<String> missing = BIOSFileMapper.getMissingBIOSFiles(this);
+                    if (!missing.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (String m : missing) {
+                            sb.append("- ").append(m).append("\n");
+                        }
+                        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                                .setTitle("Missing Files Warning")
+                                .setMessage("Warning: The following configured custom files are missing from the bios/ folder:\n\n" + sb.toString())
+                                .setPositiveButton("OK", null)
+                                .show();
+                    }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void updateBIOSTypeUI() {
+        if (biosTypeSubtext == null) return;
+        String mode = BIOSFileMapper.getBIOSSettingMode(this);
+        String active = BIOSFileMapper.getActiveBIOSMode(this);
+        String displayText = "";
+        if (BIOSFileMapper.MODE_AUTO.equals(mode)) {
+            displayText = "Auto-Detect (" + (active.equalsIgnoreCase("pc") ? "PC Mode" : "Marty Mode") + ")";
+        } else if (BIOSFileMapper.MODE_PC.equals(mode)) {
+            displayText = "FM Towns (PC)";
+        } else if (BIOSFileMapper.MODE_MARTY.equals(mode)) {
+            displayText = "FM Towns Marty";
+        } else if (BIOSFileMapper.MODE_CUSTOM.equals(mode)) {
+            displayText = "Custom (sys: " + BIOSFileMapper.getCustomSys(this) + ")";
+        }
+
+        java.util.List<String> missing = BIOSFileMapper.getMissingBIOSFiles(this);
+        if (!missing.isEmpty()) {
+            displayText += " - [⚠️ Missing " + missing.size() + " files]";
+        } else {
+            displayText += " - [All Files Present]";
+        }
+        biosTypeSubtext.setText(displayText);
     }
 }
