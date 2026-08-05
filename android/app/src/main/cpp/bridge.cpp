@@ -23,6 +23,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include <cstring>
 #include <stdarg.h>
 #include <cstdio>
+#include <map>
 
 #include "towns.h"
 #include "townsthread.h"
@@ -176,7 +177,10 @@ static std::mutex g_vm_mutex;
 static std::string g_rom_dir;
 static std::string g_log_file_path;
 
-static void write_to_log(const char *format, ...)
+static int g_bios_mode = 0; // 0 = PC, 1 = Marty, 2 = Custom
+static std::map<std::string, std::string> g_bios_mappings;
+
+void write_to_log(const char *format, ...)
 {
     if (g_log_file_path.empty()) return;
     FILE *f = fopen(g_log_file_path.c_str(), "a");
@@ -190,7 +194,45 @@ static void write_to_log(const char *format, ...)
     }
 }
 
+std::string GetBIOSFileMapping(const std::string &dirName, const std::string &defaultFileName)
+{
+    auto it = g_bios_mappings.find(defaultFileName);
+    if (it != g_bios_mappings.end() && !it->second.empty()) {
+        write_to_log("BIOS mode: %d, loading file: %s", g_bios_mode, it->second.c_str());
+        return it->second;
+    }
+    std::string fullPath = cpputil::MakeFullPathName(dirName, defaultFileName);
+    write_to_log("BIOS mode: %d, loading file: %s", g_bios_mode, fullPath.c_str());
+    return fullPath;
+}
+
 extern "C" {
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSMode(JNIEnv *env, jclass clazz, jint mode)
+{
+    g_bios_mode = mode;
+    write_to_log("C++: BIOS mode set to %d", mode);
+}
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSFileMapping(JNIEnv *env, jclass clazz, jstring jLogicName, jstring jActualPath)
+{
+    if (jLogicName == nullptr || jActualPath == nullptr) return;
+    const char *c_logic = env->GetStringUTFChars(jLogicName, nullptr);
+    const char *c_actual = env->GetStringUTFChars(jActualPath, nullptr);
+    g_bios_mappings[c_logic] = c_actual;
+    write_to_log("C++: BIOS mapping registered: %s -> %s", c_logic, c_actual);
+    env->ReleaseStringUTFChars(jLogicName, c_logic);
+    env->ReleaseStringUTFChars(jActualPath, c_actual);
+}
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeClearBIOSFileMappings(JNIEnv *env, jclass clazz)
+{
+    g_bios_mappings.clear();
+    write_to_log("C++: Cleared all BIOS file mappings");
+}
 
 JNIEXPORT void JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeSetLogFilePath(JNIEnv *env, jclass clazz, jstring logFilePath)
@@ -233,7 +275,13 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
     write_to_log("C++: Configuring memory map. RAM size: 16MB, VRAM size: 2MB");
     TownsStartParameters params;
     params.ROMPath = g_rom_dir;
-    params.townsType = TOWNSTYPE_2_MX;
+    if (g_bios_mode == 1) {
+        params.townsType = TOWNSTYPE_MARTY;
+        write_to_log("C++: Setting townsType to TOWNSTYPE_MARTY");
+    } else {
+        params.townsType = TOWNSTYPE_2_MX;
+        write_to_log("C++: Setting townsType to TOWNSTYPE_2_MX");
+    }
     params.memSizeInMB = 16; // Standard 16MB RAM
     params.highResAvailable = true;
     params.highResPCM = true;

@@ -963,6 +963,62 @@ public class EmulatorActivity extends AppCompatActivity {
         Log.i(TAG, "initCoreAndLoad: Initializing emulator core...");
         FileLogger.log("Java: EmulatorCore init starting...");
         EmulatorCore.nativeSetLogFilePath(FileLogger.getLogFilePath());
+
+        // Configure BIOS mode and custom mappings before initialization
+        BIOSFileMapper.BIOSStatus status = BIOSFileMapper.getStatus(this);
+
+        if (status.hasDeprecated && !status.isOK) {
+            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                    .setTitle("Deprecated BIOS Found")
+                    .setMessage("TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.")
+                    .setCancelable(false)
+                    .setPositiveButton("OK", (dialog, which) -> {
+                        finish();
+                    })
+                    .show();
+            return;
+        }
+
+        if (!status.isOK) {
+            String errorMsg;
+            if (status.fileCount == 0) {
+                errorMsg = "Please add BIOS files from https://github.com/Abdess/retrobios";
+            } else {
+                errorMsg = "Missing: " + status.missingFiles.toString() + "\n\nPlease add FMT_SYS.ROM and FMT_FNT.ROM from https://github.com/Abdess/retrobios";
+            }
+            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                    .setTitle("BIOS Setup Incomplete")
+                    .setMessage(errorMsg)
+                    .setCancelable(false)
+                    .setPositiveButton("OK", (dialog, which) -> {
+                        finish();
+                    })
+                    .show();
+            return;
+        }
+
+        if (status.hasDeprecated) {
+            Toast.makeText(this, "TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.", Toast.LENGTH_LONG).show();
+        }
+
+        int jniMode = 0; // PC/Auto
+        if (status.configuredMode == BIOSFileMapper.Mode.MARTY ||
+            (status.configuredMode == BIOSFileMapper.Mode.AUTO && status.detectedMode == BIOSFileMapper.Mode.MARTY)) {
+            jniMode = 1; // Marty
+        } else if (status.configuredMode == BIOSFileMapper.Mode.CUSTOM) {
+            jniMode = 2; // Custom
+        }
+
+        EmulatorCore.nativeClearBIOSFileMappings();
+        EmulatorCore.nativeSetBIOSMode(jniMode);
+
+        java.util.Map<String, String> mappings = BIOSFileMapper.getFileMappings(this);
+        for (java.util.Map.Entry<String, String> entry : mappings.entrySet()) {
+            EmulatorCore.nativeSetBIOSFileMapping(entry.getKey(), entry.getValue());
+        }
+
+        Toast.makeText(this, "Detected: " + status.statusMessage, Toast.LENGTH_SHORT).show();
+
         boolean inited = EmulatorCore.nativeInit(biosDir.getAbsolutePath(), romsDir.getAbsolutePath());
         FileLogger.log("Java: EmulatorCore init finished with result: " + inited);
         if (!inited) {
