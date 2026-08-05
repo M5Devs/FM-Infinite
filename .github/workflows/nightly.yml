@@ -1,0 +1,130 @@
+name: Nightly Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Build number (e.g., 20260805-1)'
+        required: true
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;25.2.9519653"
+
+      - name: Install CMake
+        run: sdkmanager "cmake;3.22.1"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.7'
+
+      - name: Generate Gradle Wrapper
+        run: |
+          cd android
+          gradle wrapper --gradle-version 8.7
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Build Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Set Build Number
+        id: build_info
+        run: |
+          if [ -z "${{ github.event.inputs.build_number }}" ]; then
+            echo "BUILD_NUM=$(date +%Y%m%d)-${{ github.run_number }}" >> $GITHUB_OUTPUT
+          else
+            echo "BUILD_NUM=${{ github.event.inputs.build_number }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Debug APK to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm-infinite-debug-nightly-${{ steps.build_info.outputs.BUILD_NUM }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+      - name: Upload Release APK to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm-infinite-release-nightly-${{ steps.build_info.outputs.BUILD_NUM }}
+          path: android/app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 7
+
+      - name: Create Git Tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a "nightly-${{ steps.build_info.outputs.BUILD_NUM }}" -m "Nightly build ${{ steps.build_info.outputs.BUILD_NUM }}"
+          git push origin "nightly-${{ steps.build_info.outputs.BUILD_NUM }}"
+
+      - name: Create Nightly Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
+          name: "FM Infinite Nightly ${{ steps.build_info.outputs.BUILD_NUM }}"
+          tag_name: "nightly-${{ steps.build_info.outputs.BUILD_NUM }}"
+          body: |
+            🌙 FM Infinite - Nightly Build
+
+            This is an automated nightly build.
+            **Warning:** This build may contain unstable features or bugs.
+
+            ### Build Info
+            - **Build:** ${{ steps.build_info.outputs.BUILD_NUM }}
+            - **Commit:** ${{ github.sha }}
+            - **Date:** ${{ github.event.head_commit.timestamp }}
+
+            ### Files
+            | File | Description |
+            |------|-------------|
+            | `app-debug.apk` | Debug build with symbols |
+            | `app-release-unsigned.apk` | Release build (unsigned) |
+
+            ### Requirements
+            - Android 7.0+ (API 24)
+            - FM Towns BIOS files (not included)
+            - Game disc images (ISO, MDS, or CHD)
+
+            ### Installation
+            1. Download the APK
+            2. Enable "Install from unknown sources" in Android settings
+            3. Place BIOS files in `bios/` folder on first launch
+            4. Launch and enjoy! 🕹️
+
+            ### Links
+            - [Stable Releases](https://github.com/${{ github.repository }}/releases)
+            - [Report Issues](https://github.com/${{ github.repository }}/issues)
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
