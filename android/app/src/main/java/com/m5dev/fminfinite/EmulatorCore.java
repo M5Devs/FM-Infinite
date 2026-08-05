@@ -20,6 +20,7 @@ public class EmulatorCore {
         System.loadLibrary("fminfinite_core");
     }
 
+    public static native void nativeSetLogFilePath(String logFilePath);
     public static native boolean nativeInit(String romDir, String sharedDir);
     public static native boolean nativeLoadROM(String romPath);
     public static native boolean nativeLoadDisc(String discPath);
