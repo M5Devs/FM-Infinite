@@ -15,24 +15,10 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 package com.m5dev.fminfinite;
 
-public class EmulatorCore {
-    static {
-        System.loadLibrary("fminfinite_core");
-    }
-
-    public static native void nativeSetLogFilePath(String logFilePath);
-    public static native void nativeSetBIOSMode(int mode);
-    public static native void loadBIOS(String sysPath, String fntPath);
-    public static native void nativeSetBIOSFileMapping(String logicName, String actualPath);
-    public static native void nativeClearBIOSFileMappings();
-    public static native boolean nativeInit(String romDir, String sharedDir);
-    public static native boolean nativeLoadROM(String romPath);
-    public static native boolean nativeLoadDisc(String discPath);
-    public static native void nativeRunFrame();
-    public static native boolean nativeGetFrameBuffer(int[] outPixels, int[] outSize);
-    public static native void nativeSendInput(int type, int keyOrButton, int extra);
-    public static native void nativeShutdown();
-    public static native boolean nativeSaveState(String statePath);
-    public static native boolean nativeLoadState(String statePath);
-    public static native void nativeSendKey(int keyCode, boolean pressed);
+public class Config {
+    public String biosPath = "";
+    public String biosType = "auto";  // auto, pc, marty
+    public boolean firstRun = true;
+    public String lastGamePath = "";
+    public boolean biosSetupComplete = false;
 }

@@ -216,6 +216,24 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSMode(JNIEnv *env, jclass cla
 }
 
 JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_loadBIOS(JNIEnv *env, jclass clazz, jstring sysPath, jstring fntPath)
+{
+    if (sysPath == nullptr || fntPath == nullptr) return;
+    const char *sys = env->GetStringUTFChars(sysPath, nullptr);
+    const char *fnt = env->GetStringUTFChars(fntPath, nullptr);
+
+    g_bios_mappings["FMT_SYS.ROM"] = sys;
+    g_bios_mappings["FMT_FNT.ROM"] = fnt;
+
+    __android_log_print(ANDROID_LOG_DEBUG, "FMInfinite_Bridge", "Loading BIOS: %s", sys);
+    __android_log_print(ANDROID_LOG_DEBUG, "FMInfinite_Bridge", "Loading Font: %s", fnt);
+    write_to_log("C++: loadBIOS registered: FMT_SYS.ROM -> %s, FMT_FNT.ROM -> %s", sys, fnt);
+
+    env->ReleaseStringUTFChars(sysPath, sys);
+    env->ReleaseStringUTFChars(fntPath, fnt);
+}
+
+JNIEXPORT void JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSFileMapping(JNIEnv *env, jclass clazz, jstring jLogicName, jstring jActualPath)
 {
     if (jLogicName == nullptr || jActualPath == nullptr) return;

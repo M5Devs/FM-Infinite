@@ -1012,6 +1012,15 @@ public class EmulatorActivity extends AppCompatActivity {
         EmulatorCore.nativeClearBIOSFileMappings();
         EmulatorCore.nativeSetBIOSMode(jniMode);
 
+        // Load custom BIOS paths from configuration
+        Config appConfig = ConfigManager.loadConfig(this);
+        if (appConfig.biosSetupComplete && appConfig.biosPath != null && !appConfig.biosPath.isEmpty()) {
+            BiosInfo biosInfo = BiosScanner.scanFolder(this, appConfig.biosPath);
+            if (biosInfo.hasSystemBios && biosInfo.hasFontRom) {
+                EmulatorCore.loadBIOS(biosInfo.systemBiosPath, biosInfo.fontRomPath);
+            }
+        }
+
         java.util.Map<String, String> mappings = BIOSFileMapper.getFileMappings(this);
         for (java.util.Map.Entry<String, String> entry : mappings.entrySet()) {
             EmulatorCore.nativeSetBIOSFileMapping(entry.getKey(), entry.getValue());
