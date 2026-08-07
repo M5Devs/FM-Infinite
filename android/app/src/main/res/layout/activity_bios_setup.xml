@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+LICENSE>>
+Copyright 2025 M5_Development (FM Infinite Authors)
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+<< LICENSE
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0D0D0F"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/title_bios_setup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="BIOS Setup"
+        android:textColor="#E0E0FF"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:layout_marginTop="32dp"
+        android:layout_marginBottom="8dp"/>
+
+    <TextView
+        android:id="@+id/subtitle_bios_setup"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Download BIOS from: github.com/Abdess/retrobios"
+        android:textColor="#666680"
+        android:textSize="14sp"
+        android:layout_marginBottom="32dp"/>
+
+    <!-- Required Files Status Container -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#111318"
+        android:padding="16dp"
+        android:layout_marginBottom="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Required Files:"
+            android:textColor="#7B6FFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp"/>
+
+        <!-- FMT_SYS.ROM -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+            <ImageView
+                android:id="@+id/icon_sys"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginRight="12dp"/>
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="FMT_SYS.ROM"
+                android:textColor="#E0E0FF"
+                android:textSize="16sp"/>
+            <TextView
+                android:id="@+id/status_sys"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Not found"
+                android:textColor="#FF4D4D"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+
+        <!-- FMT_FNT.ROM -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+            <ImageView
+                android:id="@+id/icon_fnt"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:layout_marginRight="12dp"/>
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="FMT_FNT.ROM"
+                android:textColor="#E0E0FF"
+                android:textSize="16sp"/>
+            <TextView
+                android:id="@+id/status_fnt"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Not found"
+                android:textColor="#FF4D4D"
+                android:textSize="14sp"
+                android:textStyle="bold"/>
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"/>
+
+    <!-- Buttons -->
+    <Button
+        android:id="@+id/btn_auto_detect"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:text="Auto-Detect"
+        android:layout_marginBottom="12dp"/>
+
+    <Button
+        android:id="@+id/btn_browse"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:text="Browse Folder"
+        android:layout_marginBottom="12dp"/>
+
+    <Button
+        android:id="@+id/btn_confirm"
+        android:layout_width="match_parent"
+        android:layout_height="54dp"
+        android:text="Confirm &amp; Launch"
+        android:enabled="false"/>
+
+</LinearLayout>

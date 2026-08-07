@@ -40,6 +40,10 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
         <activity
+            android:name=".BiosSetupActivity"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard" />
+        <activity
             android:name=".EmulatorActivity"
             android:screenOrientation="portrait"
             android:configChanges="orientation|screenSize|keyboardHidden" />

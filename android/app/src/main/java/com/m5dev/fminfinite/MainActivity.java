@@ -126,10 +126,10 @@ public class MainActivity extends AppCompatActivity {
         FileLogger.init(this);
         FileLogger.log("Java: MainActivity onCreate called");
 
-        // Check if first launch
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        if (prefs.getBoolean(KEY_FIRST_LAUNCH, true)) {
-            Intent intent = new Intent(this, FirstLaunchActivity.class);
+        // Check if BIOS setup is complete, redirect if not
+        Config config = ConfigManager.loadConfig(this);
+        if (!config.biosSetupComplete) {
+            Intent intent = new Intent(this, BiosSetupActivity.class);
             startActivity(intent);
             finish();
             return;
