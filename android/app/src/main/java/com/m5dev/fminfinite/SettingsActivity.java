@@ -59,6 +59,7 @@ public class SettingsActivity extends AppCompatActivity {
     private TextView biosTypeSubtext;
     private TextView opacityValueText;
     private TextView sizeValueText;
+    private TextView rendererSubtext;
 
     // SAF Directory Launcher
     private final ActivityResultLauncher<Uri> selectFolderLauncher = registerForActivityResult(
@@ -208,6 +209,15 @@ public class SettingsActivity extends AppCompatActivity {
         fpsRow.addView(fpsSwitch);
         fpsCard.addView(fpsRow);
         rootContainer.addView(fpsCard);
+
+        // Graphics Renderer Card
+        LinearLayout rendererCard = createSettingCard();
+        rendererCard.setOnClickListener(v -> showRendererDialog());
+        TextView rendererTitle = createSettingTitle("Graphics Renderer");
+        rendererSubtext = createSettingSubtext("Software (Compatible)");
+        rendererCard.addView(rendererTitle);
+        rendererCard.addView(rendererSubtext);
+        rootContainer.addView(rendererCard);
 
         // --- SECTION 3: CONTROLS ---
         addSectionHeader(getString(R.string.section_controls));
@@ -359,6 +369,42 @@ public class SettingsActivity extends AppCompatActivity {
 
         // Load folder configurations
         updateFolderPaths();
+
+        Config config = ConfigManager.loadConfig(this);
+        updateRendererSubtext(config.renderer);
+    }
+
+    private void showRendererDialog() {
+        String[] options = {"Software (Compatible)", "OpenGL ES (Experimental)"};
+        final String[] renderers = {"software", "gpu"};
+
+        Config config = ConfigManager.loadConfig(this);
+        int selectedIndex = 0;
+        if ("gpu".equals(config.renderer)) {
+            selectedIndex = 1;
+        }
+
+        new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                .setTitle("Select Graphics Renderer")
+                .setSingleChoiceItems(options, selectedIndex, (dialog, which) -> {
+                    config.renderer = renderers[which];
+                    ConfigManager.saveConfig(this, config);
+                    dialog.dismiss();
+                    updateRendererSubtext(config.renderer);
+                    Toast.makeText(this, "Renderer saved. Restart game to apply.", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void updateRendererSubtext(String renderer) {
+        if (rendererSubtext != null) {
+            if ("gpu".equals(renderer)) {
+                rendererSubtext.setText("OpenGL ES (Experimental)");
+            } else {
+                rendererSubtext.setText("Software (Compatible)");
+            }
+        }
     }
 
     private void addSectionHeader(String sectionTitle) {

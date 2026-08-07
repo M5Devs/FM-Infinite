@@ -48,6 +48,7 @@ public class ConfigManager {
             obj.put("firstRun", config.firstRun);
             obj.put("lastGamePath", config.lastGamePath);
             obj.put("biosSetupComplete", config.biosSetupComplete);
+            obj.put("renderer", config.renderer);
 
             File file = new File(context.getFilesDir(), CONFIG_FILE);
             try (FileOutputStream fos = new FileOutputStream(file)) {
@@ -80,11 +81,23 @@ public class ConfigManager {
             config.firstRun = obj.optBoolean("firstRun", true);
             config.lastGamePath = obj.optString("lastGamePath", "");
             config.biosSetupComplete = obj.optBoolean("biosSetupComplete", false);
+            config.renderer = obj.optString("renderer", "software");
 
             Log.i(TAG, "Config loaded from " + file.getAbsolutePath());
         } catch (Exception e) {
             Log.e(TAG, "Failed to load config, returning default Config", e);
         }
         return config;
+    }
+
+    public static void setRenderer(Context context, String renderer) {
+        Config config = loadConfig(context);
+        config.renderer = renderer;
+        saveConfig(context, config);
+    }
+
+    public static String getRenderer(Context context) {
+        Config config = loadConfig(context);
+        return config.renderer;
     }
 }

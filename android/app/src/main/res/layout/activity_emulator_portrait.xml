@@ -35,12 +35,6 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
             android:layout_height="0dp"
             android:layout_weight="1.0"
             android:background="#000000">
-
-            <com.m5dev.fminfinite.EmulatorSurfaceView
-                android:id="@+id/emulator_surface_view"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:layout_gravity="center" />
         </FrameLayout>
 
         <!-- Keyboard Container -->

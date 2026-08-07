@@ -515,6 +515,69 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeGetFrameBuffer(JNIEnv *env, jobject
     return JNI_TRUE;
 }
 
+JNIEXPORT jintArray JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_getFrameBuffer(JNIEnv *env, jclass clazz)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_window == nullptr) {
+        return nullptr;
+    }
+
+    TownsRender::ImageCopy img = g_window->GetLatestImage();
+    if (img.wid == 0 || img.hei == 0 || img.rgba.empty()) {
+        return nullptr;
+    }
+
+    jintArray result = env->NewIntArray(img.wid * img.hei);
+    if (result == nullptr) {
+        return nullptr;
+    }
+
+    jint *pixels_ptr = env->GetIntArrayElements(result, nullptr);
+    const uint32_t *src_pixels = reinterpret_cast<const uint32_t*>(img.rgba.data());
+    for (int i = 0; i < img.wid * img.hei; ++i) {
+        uint32_t rgba_pixel = src_pixels[i];
+        uint32_t r = rgba_pixel & 0xFF;
+        uint32_t g = (rgba_pixel >> 8) & 0xFF;
+        uint32_t b = (rgba_pixel >> 16) & 0xFF;
+        uint32_t a = (rgba_pixel >> 24) & 0xFF;
+        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    env->ReleaseIntArrayElements(result, pixels_ptr, 0);
+    return result;
+}
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_updateFrameSoftware(JNIEnv* env, jclass clazz, jintArray pixelArray)
+{
+    std::lock_guard<std::mutex> lock(g_vm_mutex);
+    if (g_window == nullptr || pixelArray == nullptr) {
+        return;
+    }
+
+    TownsRender::ImageCopy img = g_window->GetLatestImage();
+    if (img.wid == 0 || img.hei == 0 || img.rgba.empty()) {
+        return;
+    }
+
+    jint *pixels_ptr = env->GetIntArrayElements(pixelArray, nullptr);
+    jsize dest_len = env->GetArrayLength(pixelArray);
+    jsize copy_len = std::min<jsize>(dest_len, img.wid * img.hei);
+
+    const uint32_t *src_pixels = reinterpret_cast<const uint32_t*>(img.rgba.data());
+    for (jsize i = 0; i < copy_len; ++i) {
+        uint32_t rgba_pixel = src_pixels[i];
+        uint32_t r = rgba_pixel & 0xFF;
+        uint32_t g = (rgba_pixel >> 8) & 0xFF;
+        uint32_t b = (rgba_pixel >> 16) & 0xFF;
+        uint32_t a = (rgba_pixel >> 24) & 0xFF;
+        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    env->ReleaseIntArrayElements(pixelArray, pixels_ptr, 0);
+}
+
 JNIEXPORT void JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeSendInput(JNIEnv *env, jobject thiz, jint type, jint keyOrButton, jint extra)
 {
