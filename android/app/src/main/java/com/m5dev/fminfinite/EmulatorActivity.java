@@ -56,7 +56,7 @@ public class EmulatorActivity extends AppCompatActivity {
     private String gamePath;
     private String gameName;
 
-    private EmulatorSurfaceView surfaceView;
+    private volatile EmulatorSurfaceView surfaceView;
     private FrameLayout rootLayout;
 
     // Status Bar above controls
@@ -173,55 +173,30 @@ public class EmulatorActivity extends AppCompatActivity {
         // Load Settings
         loadSettings();
 
-        // Root Layout (FrameLayout for overlaying Quick Menu)
-        rootLayout = new FrameLayout(this);
-        rootLayout.setBackgroundColor(Color.parseColor("#0D0D0F"));
-        rootLayout.setFitsSystemWindows(true);
-        rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        LinearLayout mainVerticalLayout = new LinearLayout(this);
-        mainVerticalLayout.setOrientation(LinearLayout.VERTICAL);
-        mainVerticalLayout.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        // 1. TOP Emulator Surface View (4:3 lock scaled centered in weight-based container)
-        setupSurfaceView();
-        FrameLayout surfaceWrapper = new FrameLayout(this);
-        LinearLayout.LayoutParams wrapperParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f
-        );
-        surfaceWrapper.setLayoutParams(wrapperParams);
-        surfaceWrapper.setBackgroundColor(Color.BLACK);
-        surfaceWrapper.addView(surfaceView);
-        mainVerticalLayout.addView(surfaceWrapper);
-
-        // 2. MIDDLE Keyboard Overlay (slides/appears ABOVE gamepad area, fits between wrapper and status bar)
-        setupSoftKeyboardContainer();
-        mainVerticalLayout.addView(keyboardContainer);
-
-        // 3. MIDDLE Status Bar above controls (⌨️ on left, ☰ on right, name/FPS in center)
-        setupStatusMenuBar();
-        mainVerticalLayout.addView(statusMenuBar);
-
-        // 4. BOTTOM Virtual Gamepad (Portrait, standard 240dp height)
-        setupControlsArea();
-        mainVerticalLayout.addView(controlsArea);
-
-        rootLayout.addView(mainVerticalLayout);
-
-        // 5. Quick Menu Overlay (Initially GONE)
-        setupQuickMenuOverlay();
-        rootLayout.addView(quickMenuOverlay);
-
-        setContentView(rootLayout);
+        // Dynamically set content view and initialize/populate all elements based on current orientation
+        updateLayoutForOrientation(getResources().getConfiguration().orientation);
 
         // Initialize core and start emulation loop
         initCoreAndLoad();
+    }
+
+    private void updateLayoutForOrientation(int orientation) {
+        boolean isLandscape = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE);
+
+        setContentView(isLandscape ? R.layout.activity_emulator_landscape : R.layout.activity_emulator_portrait);
+
+        rootLayout = findViewById(R.id.root_layout);
+        surfaceView = findViewById(R.id.emulator_surface_view);
+        keyboardContainer = findViewById(R.id.keyboard_container);
+        statusMenuBar = findViewById(R.id.status_menu_bar);
+        controlsArea = findViewById(R.id.controls_area);
+        quickMenuOverlay = findViewById(R.id.quick_menu_overlay);
+
+        setupSurfaceView();
+        populateStatusMenuBar();
+        populateControlsArea(isLandscape);
+        updateKeyboardOverlay();
+        populateQuickMenuOverlay();
     }
 
     private void loadSettings() {
@@ -232,15 +207,12 @@ public class EmulatorActivity extends AppCompatActivity {
         virtualPadSize = prefs.getString("virtual_pad_size", "medium");
     }
 
-    private void setupStatusMenuBar() {
-        statusMenuBar = new LinearLayout(this);
+    private void populateStatusMenuBar() {
+        if (statusMenuBar == null) return;
+        statusMenuBar.removeAllViews();
         statusMenuBar.setOrientation(LinearLayout.HORIZONTAL);
         statusMenuBar.setBackgroundColor(Color.parseColor("#111318"));
         statusMenuBar.setGravity(Gravity.CENTER_VERTICAL);
-        statusMenuBar.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dpToPx(48) // 48dp high for comfortable touch targets
-        ));
 
         // Left ⌨️ button
         kbToggleBtn = new TextView(this);
@@ -298,17 +270,10 @@ public class EmulatorActivity extends AppCompatActivity {
     }
 
     private void setupSurfaceView() {
-        surfaceView = new EmulatorSurfaceView(this);
-        surfaceView.setScreenFilterBilinear(screenFilterBilinear);
-
-        FrameLayout.LayoutParams svParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        );
-        svParams.gravity = Gravity.CENTER;
-        surfaceView.setLayoutParams(svParams);
-
-        setupMouseInput();
+        if (surfaceView != null) {
+            surfaceView.setScreenFilterBilinear(screenFilterBilinear);
+            setupMouseInput();
+        }
     }
 
     private void setupMouseInput() {
@@ -357,21 +322,17 @@ public class EmulatorActivity extends AppCompatActivity {
         });
     }
 
-    private void setupControlsArea() {
-        controlsArea = new FrameLayout(this);
-        LinearLayout.LayoutParams caParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dpToPx(240) // 240dp high for gamepad area
-        );
-        controlsArea.setLayoutParams(caParams);
+    private void populateControlsArea(boolean isLandscape) {
+        if (controlsArea == null) return;
+        controlsArea.removeAllViews();
         controlsArea.setBackgroundColor(Color.parseColor("#0D0D0F"));
 
         // Authentic FM Towns Marty layout gamepad area
-        setupVirtualGamepad();
+        setupVirtualGamepad(isLandscape);
         controlsArea.addView(virtualPadContainer);
     }
 
-    private void setupVirtualGamepad() {
+    private void setupVirtualGamepad(boolean isLandscape) {
         virtualPadContainer = new RelativeLayout(this);
         virtualPadContainer.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -394,9 +355,16 @@ public class EmulatorActivity extends AppCompatActivity {
         RelativeLayout.LayoutParams dpadParams = new RelativeLayout.LayoutParams(
                 dpadSize, dpadSize
         );
-        dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-        dpadParams.addRule(RelativeLayout.CENTER_VERTICAL);
-        dpadParams.leftMargin = dpToPx(16);
+        if (isLandscape) {
+            dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+            dpadParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+            dpadParams.topMargin = dpToPx(16);
+            dpadParams.leftMargin = dpToPx(12);
+        } else {
+            dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+            dpadParams.addRule(RelativeLayout.CENTER_VERTICAL);
+            dpadParams.leftMargin = dpToPx(16);
+        }
         dpadLayout.setLayoutParams(dpadParams);
 
         int btnSize = dpadSize / 3;
@@ -438,9 +406,16 @@ public class EmulatorActivity extends AppCompatActivity {
         RelativeLayout.LayoutParams rightBtnsParams = new RelativeLayout.LayoutParams(
                 (int) (dpToPx(72) * scale), ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-        rightBtnsParams.addRule(RelativeLayout.CENTER_VERTICAL);
-        rightBtnsParams.rightMargin = dpToPx(24);
+        if (isLandscape) {
+            rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
+            rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+            rightBtnsParams.topMargin = dpToPx(16);
+            rightBtnsParams.rightMargin = dpToPx(12);
+        } else {
+            rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
+            rightBtnsParams.addRule(RelativeLayout.CENTER_VERTICAL);
+            rightBtnsParams.rightMargin = dpToPx(24);
+        }
         rightBtnsLayout.setLayoutParams(rightBtnsParams);
 
         int actBtnSize = (int) (dpToPx(52) * scale);
@@ -468,7 +443,13 @@ public class EmulatorActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        centerParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+        if (isLandscape) {
+            centerParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+            centerParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
+            centerParams.bottomMargin = dpToPx(16);
+        } else {
+            centerParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+        }
         centerBtns.setLayoutParams(centerParams);
 
         int centW = (int) (dpToPx(48) * scale);
@@ -586,17 +567,6 @@ public class EmulatorActivity extends AppCompatActivity {
         btn.setBackground(bg);
 
         return btn;
-    }
-
-    private void setupSoftKeyboardContainer() {
-        keyboardContainer = new LinearLayout(this);
-        keyboardContainer.setOrientation(LinearLayout.VERTICAL);
-        keyboardContainer.setBackgroundColor(Color.parseColor("#CC0D0D0F")); // Semi-transparent dark background
-        keyboardContainer.setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
-        keyboardContainer.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
     }
 
     private void cycleKeyboardState() {
@@ -748,15 +718,11 @@ public class EmulatorActivity extends AppCompatActivity {
                "PGUP".equals(label) || "PGDN".equals(label);
     }
 
-    private void setupQuickMenuOverlay() {
-        quickMenuOverlay = new FrameLayout(this);
-        FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-        );
-        quickMenuOverlay.setLayoutParams(overlayParams);
+    private void populateQuickMenuOverlay() {
+        if (quickMenuOverlay == null) return;
+        quickMenuOverlay.removeAllViews();
         quickMenuOverlay.setBackgroundColor(Color.parseColor("#AA000000"));
-        quickMenuOverlay.setVisibility(View.GONE);
+        quickMenuOverlay.setVisibility(isMenuOpen ? View.VISIBLE : View.GONE);
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
@@ -1117,7 +1083,7 @@ public class EmulatorActivity extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        // Do nothing to prevent activity restart on rotation
+        updateLayoutForOrientation(newConfig.orientation);
     }
 
     @Override
