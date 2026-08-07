@@ -21,4 +21,5 @@ public class Config {
     public boolean firstRun = true;
     public String lastGamePath = "";
     public boolean biosSetupComplete = false;
+    public String renderer = "software";  // "software" or "gpu"
 }

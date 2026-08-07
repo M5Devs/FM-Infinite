@@ -57,6 +57,7 @@ public class EmulatorActivity extends AppCompatActivity {
     private String gameName;
 
     private volatile EmulatorSurfaceView surfaceView;
+    private volatile EmulatorGLSurfaceView gpuView;
     private FrameLayout rootLayout;
 
     // Status Bar above controls
@@ -90,6 +91,8 @@ public class EmulatorActivity extends AppCompatActivity {
                 EmulatorCore.nativeRunFrame();
                 if (surfaceView != null) {
                     surfaceView.drawFrame();
+                } else if (gpuView != null) {
+                    gpuView.drawFrame();
                 }
 
                 fpsFrameCount++;
@@ -186,17 +189,67 @@ public class EmulatorActivity extends AppCompatActivity {
         setContentView(isLandscape ? R.layout.activity_emulator_landscape : R.layout.activity_emulator_portrait);
 
         rootLayout = findViewById(R.id.root_layout);
-        surfaceView = findViewById(R.id.emulator_surface_view);
         keyboardContainer = findViewById(R.id.keyboard_container);
         statusMenuBar = findViewById(R.id.status_menu_bar);
         controlsArea = findViewById(R.id.controls_area);
         quickMenuOverlay = findViewById(R.id.quick_menu_overlay);
+
+        Config config = ConfigManager.loadConfig(this);
+        FrameLayout surfaceWrapper = findViewById(R.id.surface_wrapper);
+        if (surfaceWrapper != null) {
+            surfaceWrapper.removeAllViews();
+            if ("gpu".equals(config.renderer)) {
+                gpuView = new EmulatorGLSurfaceView(this);
+                gpuView.setOnRendererFailedListener(reason -> {
+                    Log.e(TAG, "GPU Renderer failed: " + reason);
+                    Toast.makeText(this, "GPU rendering failed, falling back to Software", Toast.LENGTH_LONG).show();
+
+                    Config failConfig = ConfigManager.loadConfig(this);
+                    failConfig.renderer = "software";
+                    ConfigManager.saveConfig(this, failConfig);
+
+                    fallbackToSoftware();
+                });
+                surfaceWrapper.addView(gpuView, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER
+                ));
+                surfaceView = null;
+            } else {
+                surfaceView = new EmulatorSurfaceView(this);
+                surfaceWrapper.addView(surfaceView, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER
+                ));
+                gpuView = null;
+            }
+        }
 
         setupSurfaceView();
         populateStatusMenuBar();
         populateControlsArea(isLandscape);
         updateKeyboardOverlay();
         populateQuickMenuOverlay();
+    }
+
+    private void fallbackToSoftware() {
+        runOnUiThread(() -> {
+            FrameLayout surfaceWrapper = findViewById(R.id.surface_wrapper);
+            if (surfaceWrapper != null) {
+                surfaceWrapper.removeAllViews();
+                gpuView = null;
+                surfaceView = new EmulatorSurfaceView(this);
+                surfaceView.setScreenFilterBilinear(screenFilterBilinear);
+                surfaceWrapper.addView(surfaceView, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        Gravity.CENTER
+                ));
+                setupSurfaceView();
+            }
+        });
     }
 
     private void loadSettings() {
@@ -272,54 +325,67 @@ public class EmulatorActivity extends AppCompatActivity {
     private void setupSurfaceView() {
         if (surfaceView != null) {
             surfaceView.setScreenFilterBilinear(screenFilterBilinear);
-            setupMouseInput();
+        } else if (gpuView != null) {
+            gpuView.setScreenFilterBilinear(screenFilterBilinear);
         }
+        setupMouseInput();
     }
 
     private void setupMouseInput() {
-        surfaceView.setOnTouchListener((v, event) -> {
-            int action = event.getAction();
-            if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
-                int viewWidth = surfaceView.getWidth();
-                int viewHeight = surfaceView.getHeight();
-                if (viewWidth > 0 && viewHeight > 0) {
-                    float touchX = event.getX();
-                    float touchY = event.getY();
+        final View activeView;
+        if (surfaceView != null) {
+            activeView = surfaceView;
+        } else if (gpuView != null) {
+            activeView = gpuView;
+        } else {
+            activeView = null;
+        }
 
-                    int width = 640;
-                    int height = 480;
+        if (activeView != null) {
+            activeView.setOnTouchListener((v, event) -> {
+                int action = event.getAction();
+                if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
+                    int viewWidth = activeView.getWidth();
+                    int viewHeight = activeView.getHeight();
+                    if (viewWidth > 0 && viewHeight > 0) {
+                        float touchX = event.getX();
+                        float touchY = event.getY();
 
-                    float scaleX = (float) viewWidth / width;
-                    float scaleY = (float) viewHeight / height;
-                    float scale = Math.min(scaleX, scaleY);
+                        int width = 640;
+                        int height = 480;
 
-                    int scaledWidth = Math.round(width * scale);
-                    int scaledHeight = Math.round(height * scale);
+                        float scaleX = (float) viewWidth / width;
+                        float scaleY = (float) viewHeight / height;
+                        float scale = Math.min(scaleX, scaleY);
 
-                    int left = (viewWidth - scaledWidth) / 2;
-                    int top = (viewHeight - scaledHeight) / 2;
+                        int scaledWidth = Math.round(width * scale);
+                        int scaledHeight = Math.round(height * scale);
 
-                    float relativeX = touchX - left;
-                    float relativeY = touchY - top;
+                        int left = (viewWidth - scaledWidth) / 2;
+                        int top = (viewHeight - scaledHeight) / 2;
 
-                    int mouseX = Math.round((relativeX / scaledWidth) * width);
-                    int mouseY = Math.round((relativeY / scaledHeight) * height);
+                        float relativeX = touchX - left;
+                        float relativeY = touchY - top;
 
-                    mouseX = Math.max(0, Math.min(639, mouseX));
-                    mouseY = Math.max(0, Math.min(479, mouseY));
+                        int mouseX = Math.round((relativeX / scaledWidth) * width);
+                        int mouseY = Math.round((relativeY / scaledHeight) * height);
 
-                    int clickState = 0;
-                    if (action != MotionEvent.ACTION_UP) {
-                        clickState |= 1;
+                        mouseX = Math.max(0, Math.min(639, mouseX));
+                        mouseY = Math.max(0, Math.min(479, mouseY));
+
+                        int clickState = 0;
+                        if (action != MotionEvent.ACTION_UP) {
+                            clickState |= 1;
+                        }
+
+                        int keyOrButton = mouseX | (mouseY << 16);
+                        EmulatorCore.nativeSendInput(2, keyOrButton, clickState);
                     }
-
-                    int keyOrButton = mouseX | (mouseY << 16);
-                    EmulatorCore.nativeSendInput(2, keyOrButton, clickState);
+                    return true;
                 }
-                return true;
-            }
-            return false;
-        });
+                return false;
+            });
+        }
     }
 
     private void populateControlsArea(boolean isLandscape) {
@@ -1068,6 +1134,8 @@ public class EmulatorActivity extends AppCompatActivity {
         loadSettings();
         if (surfaceView != null) {
             surfaceView.setScreenFilterBilinear(screenFilterBilinear);
+        } else if (gpuView != null) {
+            gpuView.setScreenFilterBilinear(screenFilterBilinear);
         }
         if (fpsCounterText != null) {
             fpsCounterText.setVisibility(showFps ? View.VISIBLE : View.GONE);

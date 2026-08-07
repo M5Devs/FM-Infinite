@@ -30,6 +30,8 @@ public class EmulatorCore {
     public static native boolean nativeLoadDisc(String discPath);
     public static native void nativeRunFrame();
     public static native boolean nativeGetFrameBuffer(int[] outPixels, int[] outSize);
+    public static native int[] getFrameBuffer();
+    public static native void updateFrameSoftware(int[] pixelArray);
     public static native void nativeSendInput(int type, int keyOrButton, int extra);
     public static native void nativeShutdown();
     public static native boolean nativeSaveState(String statePath);
