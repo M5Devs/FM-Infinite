@@ -41,10 +41,23 @@ public class FileLogger {
                 externalFilesDir = appContext.getFilesDir();
             }
             File logsDir = new File(externalFilesDir, "logs");
-            if (!logsDir.exists()) {
-                boolean created = logsDir.mkdirs();
-                if (!created) {
-                    Log.e(TAG, "Failed to create logs directory: " + logsDir.getAbsolutePath());
+            boolean created = false;
+            try {
+                if (!logsDir.exists()) {
+                    created = logsDir.mkdirs();
+                } else {
+                    created = true;
+                }
+            } catch (Exception ex) {
+                Log.e(TAG, "Exception creating logs directory in external files dir", ex);
+            }
+
+            if (!created) {
+                // Fallback to internal app storage
+                externalFilesDir = appContext.getFilesDir();
+                logsDir = new File(externalFilesDir, "logs");
+                if (!logsDir.exists()) {
+                    logsDir.mkdirs();
                 }
             }
             logFile = new File(logsDir, "fminfinite.log");

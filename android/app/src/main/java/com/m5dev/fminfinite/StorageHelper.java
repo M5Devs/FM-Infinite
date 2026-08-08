@@ -76,13 +76,17 @@ public class StorageHelper {
         return null;
     }
 
-    public static void syncStorage(Context context, Uri rootUri) {
-        if (rootUri == null) return;
+    public static void syncStorage(Context context, Uri rootUri) throws java.io.IOException {
+        if (rootUri == null) {
+            throw new java.io.IOException("Root URI is null");
+        }
 
         DocumentFile rootDir = DocumentFile.fromTreeUri(context, rootUri);
-        if (rootDir == null || !rootDir.exists()) {
-            Log.e(TAG, "Root Document directory does not exist.");
-            return;
+        if (rootDir == null) {
+            throw new java.io.IOException("Failed to get DocumentFile from tree URI: " + rootUri);
+        }
+        if (!rootDir.exists()) {
+            throw new java.io.IOException("Root Document directory does not exist: " + rootUri);
         }
 
         // Auto-create subfolders in the tree directly using fromTreeUri and createDirectory

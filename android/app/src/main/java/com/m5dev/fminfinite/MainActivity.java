@@ -102,7 +102,12 @@ public class MainActivity extends AppCompatActivity {
             uri -> {
                 if (uri != null) {
                     StorageHelper.persistUriPermission(this, uri);
-                    StorageHelper.syncStorage(this, uri);
+                    try {
+                        StorageHelper.syncStorage(this, uri);
+                    } catch (java.io.IOException e) {
+                        Log.e(TAG, "Failed to sync storage", e);
+                        Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
                     refreshLibrary();
                 } else {
                     Toast.makeText(this, "Storage folder selection cancelled.", Toast.LENGTH_LONG).show();
@@ -180,7 +185,11 @@ public class MainActivity extends AppCompatActivity {
         // Sync storage content to pick up any changes
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
-            StorageHelper.syncStorage(this, storageUri);
+            try {
+                StorageHelper.syncStorage(this, storageUri);
+            } catch (java.io.IOException e) {
+                Log.e(TAG, "Failed to sync storage onResume", e);
+            }
         }
         refreshLibrary();
     }

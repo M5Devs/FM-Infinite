@@ -80,13 +80,27 @@ public class EmulatorActivity extends AppCompatActivity {
     private long fpsLastTime = 0;
     private int fpsFrameCount = 0;
 
+    private static final long FRAME_TIME_NS = 16_666_667; // ~60 FPS
+    private long lastFrameTime = 0;
+
     private HandlerThread emuThread;
     private Handler emuHandler;
     private final Runnable emuRunnable = new Runnable() {
         @Override
         public void run() {
             if (isRunning) {
-                long startTime = SystemClock.elapsedRealtime();
+                long now = System.nanoTime();
+                long elapsed = now - lastFrameTime;
+                if (elapsed < FRAME_TIME_NS) {
+                    long sleepMs = (FRAME_TIME_NS - elapsed) / 1_000_000;
+                    int sleepNs = (int) ((FRAME_TIME_NS - elapsed) % 1_000_000);
+                    try {
+                        Thread.sleep(sleepMs, sleepNs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                lastFrameTime = System.nanoTime();
 
                 EmulatorCore.nativeRunFrame();
                 if (surfaceView != null) {
@@ -96,8 +110,8 @@ public class EmulatorActivity extends AppCompatActivity {
                 }
 
                 fpsFrameCount++;
-                long now = SystemClock.elapsedRealtime();
-                long diff = now - fpsLastTime;
+                long currentRealTime = SystemClock.elapsedRealtime();
+                long diff = currentRealTime - fpsLastTime;
                 if (diff >= 1000) {
                     final int calculatedFps = Math.round((float) fpsFrameCount * 1000.0f / diff);
                     runOnUiThread(() -> {
@@ -105,14 +119,12 @@ public class EmulatorActivity extends AppCompatActivity {
                             fpsCounterText.setText(calculatedFps + " FPS");
                         }
                     });
-                    fpsLastTime = now;
+                    fpsLastTime = currentRealTime;
                     fpsFrameCount = 0;
                 }
 
-                long elapsed = SystemClock.elapsedRealtime() - startTime;
-                long delay = Math.max(0, 16 - elapsed);
-                if (emuHandler != null) {
-                    emuHandler.postDelayed(this, delay);
+                if (emuHandler != null && isRunning) {
+                    emuHandler.post(this);
                 }
             }
         }
@@ -128,7 +140,13 @@ public class EmulatorActivity extends AppCompatActivity {
         fpsLastTime = SystemClock.elapsedRealtime();
         fpsFrameCount = 0;
         emuHandler.removeCallbacks(emuRunnable);
-        emuHandler.post(emuRunnable);
+        if (!isCoreInitialized) {
+            emuHandler.post(() -> {
+                initCoreAndLoad();
+            });
+        } else {
+            emuHandler.post(emuRunnable);
+        }
     }
 
     private synchronized void stopEmuThread() {
@@ -137,7 +155,7 @@ public class EmulatorActivity extends AppCompatActivity {
             emuHandler.removeCallbacks(emuRunnable);
         }
         if (emuThread != null) {
-            emuThread.quit();
+            emuThread.quitSafely();
             try {
                 emuThread.join(1000);
             } catch (InterruptedException e) {
@@ -179,8 +197,8 @@ public class EmulatorActivity extends AppCompatActivity {
         // Dynamically set content view and initialize/populate all elements based on current orientation
         updateLayoutForOrientation(getResources().getConfiguration().orientation);
 
-        // Initialize core and start emulation loop
-        initCoreAndLoad();
+        // Initialize core and start emulation loop on background thread
+        startEmuThread();
     }
 
     private void updateLayoutForOrientation(int orientation) {
@@ -406,12 +424,38 @@ public class EmulatorActivity extends AppCompatActivity {
         ));
         virtualPadContainer.setAlpha(virtualPadOpacity);
 
+        // Get screen height / width to dynamically adjust scale for small devices
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        float screenHeightDp = metrics.heightPixels / metrics.density;
+
         // Adjust dimensions based on SharedPreferences size setting
         float scale = 1.0f;
         if ("small".equals(virtualPadSize)) {
             scale = 0.82f;
         } else if ("large".equals(virtualPadSize)) {
             scale = 1.15f;
+        }
+
+        // If on small device, scale down to avoid overlap with game screen
+        if (isLandscape) {
+            if (screenHeightDp < 400) {
+                scale *= 0.8f;
+            }
+        } else {
+            if (screenHeightDp < 650) {
+                scale *= 0.8f;
+            }
+        }
+
+        // Adjust controlsArea layout parameters dynamically
+        if (!isLandscape && controlsArea != null) {
+            ViewGroup.LayoutParams lp = controlsArea.getLayoutParams();
+            if (screenHeightDp < 650) {
+                lp.height = dpToPx(180);
+            } else {
+                lp.height = dpToPx(240);
+            }
+            controlsArea.setLayoutParams(lp);
         }
 
         int dpadSize = (int) (dpToPx(140) * scale);
@@ -963,7 +1007,7 @@ public class EmulatorActivity extends AppCompatActivity {
     private void initCoreAndLoad() {
         if (gamePath == null) {
             Log.e(TAG, "initCoreAndLoad: gamePath is null!");
-            Toast.makeText(this, "Game path is invalid.", Toast.LENGTH_LONG).show();
+            runOnUiThread(() -> Toast.makeText(this, "Game path is invalid.", Toast.LENGTH_LONG).show());
             return;
         }
 
@@ -1000,37 +1044,43 @@ public class EmulatorActivity extends AppCompatActivity {
         BIOSFileMapper.BIOSStatus status = BIOSFileMapper.getStatus(this);
 
         if (status.hasDeprecated && !status.isOK) {
-            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
-                    .setTitle("Deprecated BIOS Found")
-                    .setMessage("TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.")
-                    .setCancelable(false)
-                    .setPositiveButton("OK", (dialog, which) -> {
-                        finish();
-                    })
-                    .show();
+            runOnUiThread(() -> {
+                new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                        .setTitle("Deprecated BIOS Found")
+                        .setMessage("TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.")
+                        .setCancelable(false)
+                        .setPositiveButton("OK", (dialog, which) -> {
+                            finish();
+                        })
+                        .show();
+            });
             return;
         }
 
         if (!status.isOK) {
-            String errorMsg;
+            final String errorMsg;
             if (status.fileCount == 0) {
                 errorMsg = "Please add BIOS files from https://github.com/Abdess/retrobios";
             } else {
                 errorMsg = "Missing: " + status.missingFiles.toString() + "\n\nPlease add FMT_SYS.ROM and FMT_FNT.ROM from https://github.com/Abdess/retrobios";
             }
-            new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
-                    .setTitle("BIOS Setup Incomplete")
-                    .setMessage(errorMsg)
-                    .setCancelable(false)
-                    .setPositiveButton("OK", (dialog, which) -> {
-                        finish();
-                    })
-                    .show();
+            runOnUiThread(() -> {
+                new AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert)
+                        .setTitle("BIOS Setup Incomplete")
+                        .setMessage(errorMsg)
+                        .setCancelable(false)
+                        .setPositiveButton("OK", (dialog, which) -> {
+                            finish();
+                        })
+                        .show();
+            });
             return;
         }
 
         if (status.hasDeprecated) {
-            Toast.makeText(this, "TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.", Toast.LENGTH_LONG).show();
+            runOnUiThread(() -> {
+                Toast.makeText(this, "TOWNS.SYS is deprecated. Use FMT_SYS.ROM from retrobios.", Toast.LENGTH_LONG).show();
+            });
         }
 
         int jniMode = 0; // PC/Auto
@@ -1058,13 +1108,17 @@ public class EmulatorActivity extends AppCompatActivity {
             EmulatorCore.nativeSetBIOSFileMapping(entry.getKey(), entry.getValue());
         }
 
-        Toast.makeText(this, "Detected: " + status.statusMessage, Toast.LENGTH_SHORT).show();
+        runOnUiThread(() -> {
+            Toast.makeText(this, "Detected: " + status.statusMessage, Toast.LENGTH_SHORT).show();
+        });
 
         boolean inited = EmulatorCore.nativeInit(biosDir.getAbsolutePath(), romsDir.getAbsolutePath());
         FileLogger.log("Java: EmulatorCore init finished with result: " + inited);
         if (!inited) {
             Log.e(TAG, "initCoreAndLoad: Emulator core initialization failed.");
-            Toast.makeText(this, "Core Setup failed. Ensure you copied your FM Towns BIOS ROMs to the bios/ folder.", Toast.LENGTH_LONG).show();
+            runOnUiThread(() -> {
+                Toast.makeText(this, "Core Setup failed. Ensure you copied your FM Towns BIOS ROMs to the bios/ folder.", Toast.LENGTH_LONG).show();
+            });
             return;
         }
 
@@ -1082,13 +1136,17 @@ public class EmulatorActivity extends AppCompatActivity {
 
         if (!loaded) {
             Log.e(TAG, "initCoreAndLoad: Failed to load game: " + gamePath);
-            Toast.makeText(this, "Failed to load game image.", Toast.LENGTH_LONG).show();
+            runOnUiThread(() -> {
+                Toast.makeText(this, "Failed to load game image.", Toast.LENGTH_LONG).show();
+            });
             return;
         }
 
         Log.i(TAG, "initCoreAndLoad: Game loaded successfully. Starting background emulator thread.");
         isCoreInitialized = true;
-        startEmuThread();
+        if (isRunning && emuHandler != null) {
+            emuHandler.post(emuRunnable);
+        }
     }
 
     private void showExitConfirmation() {
@@ -1151,7 +1209,12 @@ public class EmulatorActivity extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        boolean previouslyRunning = isRunning;
+        stopEmuThread();
         updateLayoutForOrientation(newConfig.orientation);
+        if (previouslyRunning && isCoreInitialized) {
+            startEmuThread();
+        }
     }
 
     @Override
@@ -1159,6 +1222,8 @@ public class EmulatorActivity extends AppCompatActivity {
         super.onDestroy();
         stopEmuThread();
         EmulatorCore.nativeShutdown();
+        surfaceView = null;
+        gpuView = null;
     }
 
     private int dpToPx(int dp) {
