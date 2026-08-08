@@ -38,7 +38,7 @@ public class ConfigManager {
         return appContext;
     }
 
-    public static void saveConfig(Context context, Config config) {
+    public static synchronized void saveConfig(Context context, Config config) {
         if (context == null) return;
         init(context);
         try {
@@ -60,7 +60,7 @@ public class ConfigManager {
         }
     }
 
-    public static Config loadConfig(Context context) {
+    public static synchronized Config loadConfig(Context context) {
         Config config = new Config();
         if (context == null) return config;
         init(context);
@@ -90,13 +90,13 @@ public class ConfigManager {
         return config;
     }
 
-    public static void setRenderer(Context context, String renderer) {
+    public static synchronized void setRenderer(Context context, String renderer) {
         Config config = loadConfig(context);
         config.renderer = renderer;
         saveConfig(context, config);
     }
 
-    public static String getRenderer(Context context) {
+    public static synchronized String getRenderer(Context context) {
         Config config = loadConfig(context);
         return config.renderer;
     }

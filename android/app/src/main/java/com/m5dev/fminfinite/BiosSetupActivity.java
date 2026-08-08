@@ -127,7 +127,12 @@ public class BiosSetupActivity extends AppCompatActivity {
     private void onFolderSelected(Uri uri) {
         // Persist permissions and sync/create directories
         StorageHelper.persistUriPermission(this, uri);
-        StorageHelper.syncStorage(this, uri);
+        try {
+            StorageHelper.syncStorage(this, uri);
+        } catch (java.io.IOException e) {
+            android.util.Log.e(TAG, "Failed to sync storage", e);
+            Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
 
         String path = uri.toString();
 
@@ -151,7 +156,11 @@ public class BiosSetupActivity extends AppCompatActivity {
         // Run storage sync on the persisted URI if any, or scan local
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
-            StorageHelper.syncStorage(this, storageUri);
+            try {
+                StorageHelper.syncStorage(this, storageUri);
+            } catch (java.io.IOException e) {
+                android.util.Log.e(TAG, "Failed to sync storage auto-detect", e);
+            }
             config.biosPath = storageUri.toString();
             ConfigManager.saveConfig(this, config);
             performScan(config.biosPath);
@@ -172,7 +181,11 @@ public class BiosSetupActivity extends AppCompatActivity {
     private void performAutoDetectSilent() {
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
-            StorageHelper.syncStorage(this, storageUri);
+            try {
+                StorageHelper.syncStorage(this, storageUri);
+            } catch (java.io.IOException e) {
+                android.util.Log.e(TAG, "Failed to sync storage auto-detect silent", e);
+            }
             config.biosPath = storageUri.toString();
             ConfigManager.saveConfig(this, config);
             BiosInfo info = BiosScanner.scanFolder(this, config.biosPath);

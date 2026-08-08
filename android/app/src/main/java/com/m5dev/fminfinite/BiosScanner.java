@@ -21,6 +21,57 @@ import android.util.Log;
 public class BiosScanner {
     private static final String TAG = "FMInfinite_BiosScanner";
 
+    public static boolean validateBIOS(java.io.File biosFile, String expectedCRC) {
+        if (biosFile == null || !biosFile.exists()) {
+            return false;
+        }
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(biosFile)) {
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                crc.update(buffer, 0, bytesRead);
+            }
+            return Long.toHexString(crc.getValue()).equalsIgnoreCase(expectedCRC);
+        } catch (java.io.IOException e) {
+            return false;
+        }
+    }
+
+    private static void logFileCRC32(java.io.File file) {
+        if (file == null || !file.exists()) return;
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(file)) {
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = fis.read(buffer)) != -1) {
+                crc.update(buffer, 0, bytesRead);
+            }
+            String crcStr = String.format("%08X", crc.getValue());
+            Log.i(TAG, "Scanned BIOS: " + file.getName() + " -> CRC32: " + crcStr);
+            FileLogger.log("Scanned BIOS: " + file.getName() + " -> CRC32: " + crcStr);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to compute CRC32 for: " + file.getName(), e);
+        }
+    }
+
+    private static void logUriCRC32(Context context, android.net.Uri uri, String name) {
+        if (context == null || uri == null) return;
+        try (java.io.InputStream is = context.getContentResolver().openInputStream(uri)) {
+            java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while (is != null && (bytesRead = is.read(buffer)) != -1) {
+                crc.update(buffer, 0, bytesRead);
+            }
+            String crcStr = String.format("%08X", crc.getValue());
+            Log.i(TAG, "Scanned SAF BIOS: " + name + " -> CRC32: " + crcStr);
+            FileLogger.log("Scanned SAF BIOS: " + name + " -> CRC32: " + crcStr);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to compute CRC32 for SAF file: " + name, e);
+        }
+    }
+
     public static BiosInfo scanFolder(String folderPath) {
         return scanFolder(ConfigManager.getAppContext(), folderPath);
     }
@@ -55,9 +106,11 @@ public class BiosScanner {
                                 if (nameUpper.equals("FMT_SYS.ROM")) {
                                     info.hasSystemBios = true;
                                     info.systemBiosPath = fileUriStr;
+                                    logUriCRC32(context, file.getUri(), name);
                                 } else if (nameUpper.equals("FMT_FNT.ROM")) {
                                     info.hasFontRom = true;
                                     info.fontRomPath = fileUriStr;
+                                    logUriCRC32(context, file.getUri(), name);
                                 } else if (nameUpper.equals("MAR_EX0.ROM")) {
                                     hasMar0 = true;
                                 } else if (nameUpper.equals("MAR_EX1.ROM")) {
@@ -93,9 +146,11 @@ public class BiosScanner {
                                 if (nameUpper.equals("FMT_SYS.ROM")) {
                                     info.hasSystemBios = true;
                                     info.systemBiosPath = filePath;
+                                    logFileCRC32(file);
                                 } else if (nameUpper.equals("FMT_FNT.ROM")) {
                                     info.hasFontRom = true;
                                     info.fontRomPath = filePath;
+                                    logFileCRC32(file);
                                 } else if (nameUpper.equals("MAR_EX0.ROM")) {
                                     hasMar0 = true;
                                 } else if (nameUpper.equals("MAR_EX1.ROM")) {
@@ -132,9 +187,11 @@ public class BiosScanner {
                                 if (nameUpper.equals("FMT_SYS.ROM")) {
                                     info.hasSystemBios = true;
                                     info.systemBiosPath = filePath;
+                                    logFileCRC32(file);
                                 } else if (nameUpper.equals("FMT_FNT.ROM")) {
                                     info.hasFontRom = true;
                                     info.fontRomPath = filePath;
+                                    logFileCRC32(file);
                                 } else if (nameUpper.equals("MAR_EX0.ROM")) {
                                     hasMar0 = true;
                                 } else if (nameUpper.equals("MAR_EX1.ROM")) {

@@ -67,7 +67,12 @@ public class SettingsActivity extends AppCompatActivity {
             uri -> {
                 if (uri != null) {
                     StorageHelper.persistUriPermission(this, uri);
-                    StorageHelper.syncStorage(this, uri);
+                    try {
+                        StorageHelper.syncStorage(this, uri);
+                    } catch (java.io.IOException e) {
+                        android.util.Log.e("SettingsActivity", "Failed to sync storage", e);
+                        Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
                     updateFolderPaths();
                     Toast.makeText(this, "Storage folder updated and synchronized.", Toast.LENGTH_SHORT).show();
                 }

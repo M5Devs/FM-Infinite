@@ -167,6 +167,7 @@ public class EmulatorGLSurfaceView extends GLSurfaceView {
 
         private void reportError(final String msg) {
             Log.e(TAG, "Renderer Error: " + msg);
+            FileLogger.log("Renderer Error: " + msg);
             post(() -> {
                 if (failedListener != null) {
                     failedListener.onRendererFailed(msg);
