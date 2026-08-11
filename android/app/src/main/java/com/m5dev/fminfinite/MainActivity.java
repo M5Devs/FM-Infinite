@@ -75,8 +75,14 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout searchBarContainer;
     private EditText searchEditText;
     private LinearLayout tabsContainer;
-    private Button tabLibraryBtn;
-    private Button tabRecentBtn;
+
+    // Custom tab bar elements (PPSSPP indicator style)
+    private LinearLayout tabLibraryLayout;
+    private TextView tabLibraryText;
+    private View tabLibraryIndicator;
+    private LinearLayout tabRecentLayout;
+    private TextView tabRecentText;
+    private View tabRecentIndicator;
 
     private FrameLayout contentContainer;
     private GridView libraryGridView;
@@ -84,6 +90,14 @@ public class MainActivity extends AppCompatActivity {
     private LinearLayout emptyStateContainer;
 
     private RelativeLayout fabBtn;
+
+    // Bitmap Cache to prevent memory leaks and OOM
+    private final android.util.LruCache<String, Bitmap> coverCache = new android.util.LruCache<String, Bitmap>(20) {
+        @Override
+        protected void entryRemoved(boolean evicted, String key, Bitmap old, Bitmap newValue) {
+            if (evicted && old != null && !old.isRecycled()) old.recycle();
+        }
+    };
 
     // Adapters & Data lists
     private LibraryAdapter libraryAdapter;
@@ -146,7 +160,7 @@ public class MainActivity extends AppCompatActivity {
         // Main Programmatic Layout
         rootLayout = new LinearLayout(this);
         rootLayout.setOrientation(LinearLayout.VERTICAL);
-        rootLayout.setBackgroundColor(Color.parseColor("#0D0D0F"));
+        rootLayout.setBackgroundColor(Color.parseColor("#0D0D14")); // Near-black with blue tint
         rootLayout.setFitsSystemWindows(true);
         rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -182,43 +196,60 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // Sync storage content to pick up any changes
+        // Fix 5: Sync storage content on background thread to prevent UI lock
         Uri storageUri = StorageHelper.getPersistedUri(this);
         if (storageUri != null) {
-            try {
-                StorageHelper.syncStorage(this, storageUri);
-            } catch (java.io.IOException e) {
-                Log.e(TAG, "Failed to sync storage onResume", e);
-            }
+            final Uri uri = storageUri;
+            new Thread(() -> {
+                try {
+                    StorageHelper.syncStorage(MainActivity.this, uri);
+                } catch (java.io.IOException e) {
+                    Log.e(TAG, "Failed to sync storage onResume", e);
+                }
+                runOnUiThread(this::refreshLibrary);
+            }, "StorageSyncThread").start();
+        } else {
+            refreshLibrary();
         }
-        refreshLibrary();
     }
 
     private void setupToolbar() {
         toolbarLayout = new RelativeLayout(this);
         toolbarLayout.setPadding(dpToPx(16), dpToPx(12), dpToPx(16), dpToPx(12));
-        toolbarLayout.setBackgroundColor(Color.parseColor("#111318"));
+        toolbarLayout.setBackgroundColor(Color.parseColor("#13141F")); // Surface color
         LinearLayout.LayoutParams toolbarParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                dpToPx(56) // Height: 56dp
         );
         toolbarLayout.setLayoutParams(toolbarParams);
 
-        // FM Infinite Title Logo (Left)
-        TextView logoText = new TextView(this);
-        logoText.setId(View.generateViewId());
-        logoText.setText("FM Infinite");
-        logoText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        logoText.setTextColor(Color.parseColor("#7B6FFF"));
-        logoText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-        RelativeLayout.LayoutParams logoParams = new RelativeLayout.LayoutParams(
+        // App Icon (small, 28dp width/height) + "FM Infinite" text (Left)
+        LinearLayout logoContainer = new LinearLayout(this);
+        logoContainer.setId(View.generateViewId());
+        logoContainer.setOrientation(LinearLayout.HORIZONTAL);
+        logoContainer.setGravity(Gravity.CENTER_VERTICAL);
+        RelativeLayout.LayoutParams logoContainerParams = new RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        logoParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-        logoParams.addRule(RelativeLayout.CENTER_VERTICAL);
-        logoText.setLayoutParams(logoParams);
-        toolbarLayout.addView(logoText);
+        logoContainerParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+        logoContainerParams.addRule(RelativeLayout.CENTER_VERTICAL);
+        logoContainer.setLayoutParams(logoContainerParams);
+
+        TextView appIcon = new TextView(this);
+        appIcon.setText("🖥️");
+        appIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20); // ~28dp
+        appIcon.setPadding(0, 0, dpToPx(8), 0);
+        logoContainer.addView(appIcon);
+
+        TextView logoText = new TextView(this);
+        logoText.setText("FM Infinite");
+        logoText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        logoText.setTextColor(Color.parseColor("#7B68EE")); // Primary color
+        logoText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+        logoContainer.addView(logoText);
+
+        toolbarLayout.addView(logoContainer);
 
         // Search Bar Container (Initially Hidden)
         searchBarContainer = new LinearLayout(this);
@@ -229,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        searchParams.addRule(RelativeLayout.RIGHT_OF, logoText.getId());
+        searchParams.addRule(RelativeLayout.RIGHT_OF, logoContainer.getId());
         searchParams.addRule(RelativeLayout.LEFT_OF, View.generateViewId()); // will anchor to settings below
         searchParams.addRule(RelativeLayout.CENTER_VERTICAL);
         searchParams.leftMargin = dpToPx(16);
@@ -238,8 +269,8 @@ public class MainActivity extends AppCompatActivity {
 
         searchEditText = new EditText(this);
         searchEditText.setHint("Search games...");
-        searchEditText.setHintTextColor(Color.parseColor("#666680"));
-        searchEditText.setTextColor(Color.parseColor("#E0E0FF"));
+        searchEditText.setHintTextColor(Color.parseColor("#4A4A6A")); // Text Disabled
+        searchEditText.setTextColor(Color.parseColor("#E8E8FF")); // Text Primary
         searchEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         searchEditText.setBackgroundColor(Color.TRANSPARENT);
         searchEditText.setSingleLine(true);
@@ -301,53 +332,102 @@ public class MainActivity extends AppCompatActivity {
     private void setupTabs() {
         tabsContainer = new LinearLayout(this);
         tabsContainer.setOrientation(LinearLayout.HORIZONTAL);
-        tabsContainer.setBackgroundColor(Color.parseColor("#111318"));
+        tabsContainer.setBackgroundColor(Color.parseColor("#13141F")); // Surface color
         LinearLayout.LayoutParams tabsParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
         tabsContainer.setLayoutParams(tabsParams);
 
-        LinearLayout.LayoutParams tabBtnParams = new LinearLayout.LayoutParams(
-                0, dpToPx(48), 1.0f
+        LinearLayout.LayoutParams tabCellParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f
         );
 
-        tabLibraryBtn = new Button(this);
-        tabLibraryBtn.setText(getString(R.string.tab_library));
-        tabLibraryBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        tabLibraryBtn.setBackgroundColor(Color.TRANSPARENT);
-        tabLibraryBtn.setLayoutParams(tabBtnParams);
-        tabLibraryBtn.setOnClickListener(v -> selectTab(0));
-        tabsContainer.addView(tabLibraryBtn);
+        // 1. Library Tab
+        tabLibraryLayout = new LinearLayout(this);
+        tabLibraryLayout.setOrientation(LinearLayout.VERTICAL);
+        tabLibraryLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+        tabLibraryLayout.setLayoutParams(tabCellParams);
+        tabLibraryLayout.setPadding(0, dpToPx(12), 0, 0);
 
-        tabRecentBtn = new Button(this);
-        tabRecentBtn.setText(getString(R.string.tab_recent));
-        tabRecentBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        tabRecentBtn.setBackgroundColor(Color.TRANSPARENT);
-        tabRecentBtn.setLayoutParams(tabBtnParams);
-        tabRecentBtn.setOnClickListener(v -> selectTab(1));
-        tabsContainer.addView(tabRecentBtn);
+        tabLibraryText = new TextView(this);
+        tabLibraryText.setText(getString(R.string.tab_library));
+        tabLibraryText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        tabLibraryText.setGravity(Gravity.CENTER);
+        tabLibraryLayout.addView(tabLibraryText);
+
+        tabLibraryIndicator = new View(this);
+        LinearLayout.LayoutParams ind1Params = new LinearLayout.LayoutParams(
+                dpToPx(80), dpToPx(2)
+        );
+        ind1Params.topMargin = dpToPx(10);
+        tabLibraryIndicator.setLayoutParams(ind1Params);
+        tabLibraryIndicator.setBackgroundColor(Color.parseColor("#7B68EE"));
+        tabLibraryLayout.addView(tabLibraryIndicator);
+
+        tabLibraryLayout.setOnClickListener(v -> selectTab(0));
+        tabsContainer.addView(tabLibraryLayout);
+
+        // 2. Recent Tab
+        tabRecentLayout = new LinearLayout(this);
+        tabRecentLayout.setOrientation(LinearLayout.VERTICAL);
+        tabRecentLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+        tabRecentLayout.setLayoutParams(tabCellParams);
+        tabRecentLayout.setPadding(0, dpToPx(12), 0, 0);
+
+        tabRecentText = new TextView(this);
+        tabRecentText.setText(getString(R.string.tab_recent));
+        tabRecentText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        tabRecentText.setGravity(Gravity.CENTER);
+        tabRecentLayout.addView(tabRecentText);
+
+        tabRecentIndicator = new View(this);
+        LinearLayout.LayoutParams ind2Params = new LinearLayout.LayoutParams(
+                dpToPx(80), dpToPx(2)
+        );
+        ind2Params.topMargin = dpToPx(10);
+        tabRecentIndicator.setLayoutParams(ind2Params);
+        tabRecentIndicator.setBackgroundColor(Color.parseColor("#7B68EE"));
+        tabRecentLayout.addView(tabRecentIndicator);
+
+        tabRecentLayout.setOnClickListener(v -> selectTab(1));
+        tabsContainer.addView(tabRecentLayout);
 
         updateTabStyles();
     }
 
     private void updateTabStyles() {
         if (activeTab == 0) {
-            tabLibraryBtn.setTextColor(Color.parseColor("#7B6FFF"));
-            tabLibraryBtn.setTypeface(Typeface.DEFAULT_BOLD);
-            tabRecentBtn.setTextColor(Color.parseColor("#666680"));
-            tabRecentBtn.setTypeface(Typeface.DEFAULT);
+            tabLibraryText.setTextColor(Color.parseColor("#7B68EE")); // Primary
+            tabLibraryText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            tabLibraryIndicator.setVisibility(View.VISIBLE);
+
+            tabRecentText.setTextColor(Color.parseColor("#9090B0")); // Text Secondary
+            tabRecentText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            tabRecentIndicator.setVisibility(View.INVISIBLE);
         } else {
-            tabLibraryBtn.setTextColor(Color.parseColor("#666680"));
-            tabLibraryBtn.setTypeface(Typeface.DEFAULT);
-            tabRecentBtn.setTextColor(Color.parseColor("#7B6FFF"));
-            tabRecentBtn.setTypeface(Typeface.DEFAULT_BOLD);
+            tabLibraryText.setTextColor(Color.parseColor("#9090B0")); // Text Secondary
+            tabLibraryText.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            tabLibraryIndicator.setVisibility(View.INVISIBLE);
+
+            tabRecentText.setTextColor(Color.parseColor("#7B68EE")); // Primary
+            tabRecentText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+            tabRecentIndicator.setVisibility(View.VISIBLE);
         }
     }
 
     private void selectTab(int index) {
         activeTab = index;
         updateTabStyles();
+
+        // Show FAB only on Library tab when folder is already configured
+        Uri storageUri = StorageHelper.getPersistedUri(this);
+        if (activeTab == 0 && storageUri != null) {
+            if (fabBtn != null) fabBtn.setVisibility(View.VISIBLE);
+        } else {
+            if (fabBtn != null) fabBtn.setVisibility(View.GONE);
+        }
+
         if (activeTab == 0) {
             recentListView.setVisibility(View.GONE);
             if (filteredGames.isEmpty()) {
@@ -377,9 +457,10 @@ public class MainActivity extends AppCompatActivity {
         );
         contentContainer.setLayoutParams(containerParams);
 
-        // A. Library GridView (2 Columns)
+        // A. Library GridView (PPSSPP Responsive layout)
         libraryGridView = new GridView(this);
-        libraryGridView.setNumColumns(2);
+        int columns = getResources().getConfiguration().smallestScreenWidthDp >= 600 ? 3 : 2;
+        libraryGridView.setNumColumns(columns);
         libraryGridView.setStretchMode(GridView.STRETCH_COLUMN_WIDTH);
         libraryGridView.setHorizontalSpacing(dpToPx(16));
         libraryGridView.setVerticalSpacing(dpToPx(16));
@@ -395,7 +476,7 @@ public class MainActivity extends AppCompatActivity {
         recentListView = new ListView(this);
         recentListView.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16));
         recentListView.setClipToPadding(false);
-        recentListView.setDividerHeight(dpToPx(12));
+        recentListView.setDividerHeight(dpToPx(8)); // 8dp gap between items
         recentListView.setDivider(new GradientDrawable()); // Transparent spacing
         recentListView.setOnItemClickListener((parent, view, position, id) -> {
             String path = recentGamePaths.get(position);
@@ -413,52 +494,66 @@ public class MainActivity extends AppCompatActivity {
 
         TextView emptyIcon = new TextView(this);
         emptyIcon.setText("🖥️");
-        emptyIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 54);
+        emptyIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 64); // 64sp
         emptyIcon.setGravity(Gravity.CENTER);
         emptyStateContainer.addView(emptyIcon);
 
         TextView emptyText = new TextView(this);
-        emptyText.setText(getString(R.string.empty_games));
-        emptyText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
-        emptyText.setTextColor(Color.parseColor("#E0E0FF"));
+        emptyText.setText("No Games Found"); // Title: No Games Found
+        emptyText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20); // 20sp
+        emptyText.setTextColor(Color.parseColor("#E8E8FF")); // Text Primary
+        emptyText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         emptyText.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams etParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        etParams.topMargin = dpToPx(12);
-        etParams.bottomMargin = dpToPx(24);
+        etParams.topMargin = dpToPx(16);
         emptyText.setLayoutParams(etParams);
         emptyStateContainer.addView(emptyText);
 
-        // Select Folder Button
+        TextView emptySubtext = new TextView(this);
+        emptySubtext.setText("Add your FM Towns ROM/ISO files"); // Subtitle
+        emptySubtext.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14); // 14sp
+        emptySubtext.setTextColor(Color.parseColor("#9090B0")); // Text Secondary
+        emptySubtext.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams estParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+        );
+        estParams.topMargin = dpToPx(8);
+        estParams.bottomMargin = dpToPx(24);
+        emptySubtext.setLayoutParams(estParams);
+        emptyStateContainer.addView(emptySubtext);
+
+        // Select Folder Button (Primary bg, white text, 12dp rounded, 48dp height)
         Button selectFoldBtn = new Button(this);
         selectFoldBtn.setText(getString(R.string.select_folder_btn));
         selectFoldBtn.setTextColor(Color.WHITE);
         selectFoldBtn.setTypeface(Typeface.DEFAULT_BOLD);
         selectFoldBtn.setAllCaps(false);
         GradientDrawable foldBg = new GradientDrawable();
-        foldBg.setColor(Color.parseColor("#7B6FFF"));
-        foldBg.setCornerRadius(dpToPx(8));
+        foldBg.setColor(Color.parseColor("#7B68EE")); // Primary color
+        foldBg.setCornerRadius(dpToPx(12)); // 12dp rounded
         selectFoldBtn.setBackground(foldBg);
         LinearLayout.LayoutParams fBtnParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(48)
         );
-        fBtnParams.bottomMargin = dpToPx(12);
+        fBtnParams.bottomMargin = dpToPx(16); // 16dp gap between buttons
         selectFoldBtn.setLayoutParams(fBtnParams);
         selectFoldBtn.setOnClickListener(v -> openDocumentTreeLauncher.launch(null));
         emptyStateContainer.addView(selectFoldBtn);
 
-        // Load ROM Button
+        // Load ROM Button (transparent bg, Primary border 1dp, Primary text, 12dp rounded, 48dp height)
         Button loadRomBtn = new Button(this);
         loadRomBtn.setText(getString(R.string.load_rom_btn));
-        loadRomBtn.setTextColor(Color.parseColor("#7B6FFF"));
+        loadRomBtn.setTextColor(Color.parseColor("#7B68EE")); // Primary text
         loadRomBtn.setTypeface(Typeface.DEFAULT_BOLD);
         loadRomBtn.setAllCaps(false);
         GradientDrawable romBg = new GradientDrawable();
         romBg.setColor(Color.TRANSPARENT);
-        romBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
-        romBg.setCornerRadius(dpToPx(8));
+        romBg.setStroke(dpToPx(1), Color.parseColor("#7B68EE"));
+        romBg.setCornerRadius(dpToPx(12)); // 12dp rounded
         loadRomBtn.setBackground(romBg);
         loadRomBtn.setLayoutParams(new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(48)
@@ -475,15 +570,17 @@ public class MainActivity extends AppCompatActivity {
                 dpToPx(56), dpToPx(56)
         );
         fabParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        fabParams.bottomMargin = dpToPx(24);
-        fabParams.rightMargin = dpToPx(24);
+        fabParams.bottomMargin = dpToPx(20);
+        fabParams.rightMargin = dpToPx(20);
         fabBtn.setLayoutParams(fabParams);
 
+        // 56dp circle, Primary bg
         GradientDrawable fabBg = new GradientDrawable();
         fabBg.setShape(GradientDrawable.OVAL);
-        fabBg.setColor(Color.parseColor("#7B6FFF"));
+        fabBg.setColor(Color.parseColor("#7B68EE"));
         fabBtn.setBackground(fabBg);
 
+        // White + icon 28sp centered
         TextView plusText = new TextView(this);
         plusText.setText("+");
         plusText.setTextColor(Color.WHITE);
@@ -572,7 +669,9 @@ public class MainActivity extends AppCompatActivity {
                 for (File f : files) {
                     if (f.isFile()) {
                         String name = f.getName().toLowerCase();
-                        if (name.endsWith(".iso") || name.endsWith(".mds") || name.endsWith(".cue") || name.endsWith(".chd")) {
+                        // Support .iso, .mds, .cue, .chd, .d77, .img
+                        if (name.endsWith(".iso") || name.endsWith(".mds") || name.endsWith(".cue") ||
+                            name.endsWith(".chd") || name.endsWith(".d77") || name.endsWith(".img")) {
                             list.add(f);
                         }
                     }
@@ -583,51 +682,65 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void copyAndLaunchDirectly(Uri uri) {
-        try {
-            // Get original filename
-            String filename = "custom_game.iso";
-            try (android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
-                if (cursor != null && cursor.moveToFirst()) {
-                    int nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
-                    if (nameIndex != -1) {
-                        filename = cursor.getString(nameIndex);
+        // Get original filename first (quick, on UI thread)
+        String[] filename = {"custom_game.iso"};
+        try (android.database.Cursor cursor = getContentResolver().query(uri, null, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME);
+                if (nameIndex != -1) {
+                    filename[0] = cursor.getString(nameIndex);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Cursor error", e);
+        }
+
+        android.app.ProgressDialog progress = new android.app.ProgressDialog(this);
+        progress.setMessage("Adding game to library...");
+        progress.setIndeterminate(true);
+        progress.setCancelable(false);
+        progress.show();
+
+        final String finalFilename = filename[0];
+        new Thread(() -> {
+            try {
+                File localRoot = getExternalFilesDir(null);
+                if (localRoot == null) localRoot = getFilesDir();
+                File romsDir = new File(localRoot, StorageHelper.SUBFOLDER_ROMS);
+                if (!romsDir.exists()) romsDir.mkdirs();
+                File localDest = new File(romsDir, finalFilename);
+
+                // Copy file to local roms directory in chunks
+                try (InputStream in = getContentResolver().openInputStream(uri);
+                     FileOutputStream out = new FileOutputStream(localDest)) {
+                    byte[] buf = new byte[65536];
+                    int len;
+                    while (in != null && (len = in.read(buf)) > 0) {
+                        out.write(buf, 0, len);
                     }
                 }
-            }
 
-            File localRoot = getExternalFilesDir(null);
-            if (localRoot == null) localRoot = getFilesDir();
-            File romsDir = new File(localRoot, StorageHelper.SUBFOLDER_ROMS);
-            if (!romsDir.exists()) romsDir.mkdirs();
-
-            File localDest = new File(romsDir, filename);
-
-            // Copy to local
-            try (InputStream in = getContentResolver().openInputStream(uri);
-                 FileOutputStream out = new FileOutputStream(localDest)) {
-                byte[] buf = new byte[8192];
-                int len;
-                while ((in != null) && (len = in.read(buf)) > 0) {
-                    out.write(buf, 0, len);
+                // Sync saves to SAF if configured
+                Uri storageUri = StorageHelper.getPersistedUri(this);
+                if (storageUri != null) {
+                    StorageHelper.syncLocalSavesToSAF(this, storageUri);
                 }
+
+                final File dest = localDest;
+                runOnUiThread(() -> {
+                    progress.dismiss();
+                    Toast.makeText(this, "Game added to library", Toast.LENGTH_SHORT).show();
+                    refreshLibrary();
+                    launchGame(dest);
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to copy file", e);
+                runOnUiThread(() -> {
+                    progress.dismiss();
+                    Toast.makeText(this, "Error adding file to library.", Toast.LENGTH_LONG).show();
+                });
             }
-
-            // Sync back to SAF if permission is active
-            Uri storageUri = StorageHelper.getPersistedUri(this);
-            if (storageUri != null) {
-                StorageHelper.syncLocalSavesToSAF(this, storageUri);
-            }
-
-            Toast.makeText(this, "Game added to library", Toast.LENGTH_SHORT).show();
-            refreshLibrary();
-
-            // Launch the added game!
-            launchGame(localDest);
-
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to copy custom file", e);
-            Toast.makeText(this, "Error adding file to library.", Toast.LENGTH_LONG).show();
-        }
+        }, "FileCopyThread").start();
     }
 
     private void launchGame(File gameFile) {
@@ -771,7 +884,19 @@ public class MainActivity extends AppCompatActivity {
                 itemLayout = new LinearLayout(MainActivity.this);
                 itemLayout.setOrientation(LinearLayout.VERTICAL);
                 itemLayout.setGravity(Gravity.CENTER_HORIZONTAL);
-                itemLayout.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+
+                // Item card params: Height 180dp
+                GridView.LayoutParams cardParams = new GridView.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(180)
+                );
+                itemLayout.setLayoutParams(cardParams);
+
+                GradientDrawable cardBg = new GradientDrawable();
+                cardBg.setColor(Color.parseColor("#13141F")); // Surface bg
+                cardBg.setCornerRadius(dpToPx(10)); // 10dp rounded corners
+                cardBg.setStroke(dpToPx(1), Color.parseColor("#252538")); // 1dp Divider color border
+                itemLayout.setBackground(cardBg);
+                itemLayout.setClipToOutline(true);
             } else {
                 itemLayout = (LinearLayout) convertView;
                 itemLayout.removeAllViews();
@@ -780,84 +905,83 @@ public class MainActivity extends AppCompatActivity {
             File gameFile = filteredGames.get(position);
             String displayName = getBaseName(gameFile.getName());
 
-            // 1. Cover Art Frame
+            // Cover Image Frame (Fills top 70% of card)
             FrameLayout coverFrame = new FrameLayout(MainActivity.this);
-            LinearLayout.LayoutParams frameParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(160)
+            LinearLayout.LayoutParams coverParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.7f
             );
-            coverFrame.setLayoutParams(frameParams);
+            coverFrame.setLayoutParams(coverParams);
 
             Bitmap coverBitmap = loadCover(gameFile.getName());
             if (coverBitmap != null) {
-                // Show cover image
                 ImageView coverImg = new ImageView(MainActivity.this);
                 coverImg.setImageBitmap(coverBitmap);
                 coverImg.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
-                GradientDrawable imageBg = new GradientDrawable();
-                imageBg.setColor(Color.parseColor("#111318"));
-                imageBg.setCornerRadius(dpToPx(8));
-                coverImg.setBackground(imageBg);
+                // Rounded top corners only
+                GradientDrawable imgBg = new GradientDrawable();
+                imgBg.setColor(Color.parseColor("#13141F"));
+                imgBg.setCornerRadii(new float[]{
+                        dpToPx(10), dpToPx(10), // top-left
+                        dpToPx(10), dpToPx(10), // top-right
+                        0, 0,
+                        0, 0
+                });
+                coverImg.setBackground(imgBg);
                 coverImg.setClipToOutline(true);
 
                 coverFrame.addView(coverImg, new FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
                 ));
             } else {
-                // Custom dark placeholder card with centered white text + watermark
-                GradientDrawable phBg = new GradientDrawable();
-                phBg.setColor(Color.parseColor("#111318"));
-                phBg.setCornerRadius(dpToPx(8));
-                phBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
-                coverFrame.setBackground(phBg);
+                // Placeholder
+                LinearLayout phLayout = new LinearLayout(MainActivity.this);
+                phLayout.setOrientation(LinearLayout.VERTICAL);
+                phLayout.setGravity(Gravity.CENTER);
+                phLayout.setBackgroundColor(Color.parseColor("#13141F"));
 
-                // Watermark in bottom right
-                TextView watermark = new TextView(MainActivity.this);
-                watermark.setText("FM Infinite");
-                watermark.setTextColor(Color.parseColor("#222432")); // Low contrast
-                watermark.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-                watermark.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-                FrameLayout.LayoutParams wmParams = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                wmParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-                wmParams.rightMargin = dpToPx(8);
-                wmParams.bottomMargin = dpToPx(8);
-                watermark.setLayoutParams(wmParams);
-                coverFrame.addView(watermark);
+                TextView phIcon = new TextView(MainActivity.this);
+                phIcon.setText("🖥️"); // Platform icon
+                phIcon.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28);
+                phLayout.addView(phIcon);
 
-                // Centered bold text
-                TextView nameCenter = new TextView(MainActivity.this);
-                nameCenter.setText(displayName);
-                nameCenter.setTextColor(Color.WHITE);
-                nameCenter.setGravity(Gravity.CENTER);
-                nameCenter.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
-                nameCenter.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-                nameCenter.setTypeface(Typeface.DEFAULT_BOLD);
-                FrameLayout.LayoutParams textParams = new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                textParams.gravity = Gravity.CENTER;
-                nameCenter.setLayoutParams(textParams);
-                coverFrame.addView(nameCenter);
+                TextView phText = new TextView(MainActivity.this);
+                phText.setText(displayName);
+                phText.setTextColor(Color.parseColor("#9090B0")); // Text Secondary
+                phText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+                phText.setGravity(Gravity.CENTER);
+                phText.setPadding(dpToPx(8), dpToPx(4), dpToPx(8), 0);
+                phText.setSingleLine(true);
+                phText.setEllipsize(TextUtils.TruncateAt.END);
+                phLayout.addView(phText);
+
+                coverFrame.addView(phLayout, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
+                ));
             }
 
             itemLayout.addView(coverFrame);
 
-            // 2. Game name text below card
+            // Text Area (Fills bottom 30% of card)
+            LinearLayout textLayout = new LinearLayout(MainActivity.this);
+            textLayout.setOrientation(LinearLayout.VERTICAL);
+            textLayout.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.3f
+            );
+            textLayout.setLayoutParams(textParams);
+
             TextView nameBelow = new TextView(MainActivity.this);
             nameBelow.setText(displayName);
-            nameBelow.setTextColor(Color.parseColor("#E0E0FF"));
+            nameBelow.setTextColor(Color.parseColor("#E8E8FF")); // Text Primary
             nameBelow.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             nameBelow.setGravity(Gravity.CENTER);
             nameBelow.setSingleLine(true);
             nameBelow.setEllipsize(TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams nbParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            nbParams.topMargin = dpToPx(6);
-            nameBelow.setLayoutParams(nbParams);
-            itemLayout.addView(nameBelow);
+            nameBelow.setPadding(dpToPx(8), 0, dpToPx(8), 0);
+            textLayout.addView(nameBelow);
+
+            itemLayout.addView(textLayout);
 
             return itemLayout;
         }
@@ -890,18 +1014,19 @@ public class MainActivity extends AppCompatActivity {
                 itemLayout.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
 
                 GradientDrawable itemBg = new GradientDrawable();
-                itemBg.setColor(Color.parseColor("#111318"));
-                itemBg.setCornerRadius(dpToPx(8));
+                itemBg.setColor(Color.parseColor("#13141F")); // Surface bg
+                itemBg.setCornerRadius(dpToPx(8)); // rounded 8dp
                 itemLayout.setBackground(itemBg);
             } else {
                 itemLayout = (LinearLayout) convertView;
+                itemLayout.removeAllViews();
             }
 
             String path = recentGamePaths.get(position);
             File gameFile = new File(path);
             String displayName = getBaseName(gameFile.getName());
 
-            // 1. Cover Art thumbnail on the left
+            // 1. Cover Art thumbnail on the left (50x50dp, rounded 8dp)
             ImageView coverThumb = new ImageView(MainActivity.this);
             LinearLayout.LayoutParams thumbParams = new LinearLayout.LayoutParams(
                     dpToPx(50), dpToPx(50)
@@ -913,17 +1038,22 @@ public class MainActivity extends AppCompatActivity {
             if (coverBitmap != null) {
                 coverThumb.setImageBitmap(coverBitmap);
                 coverThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+
+                GradientDrawable imgBg = new GradientDrawable();
+                imgBg.setColor(Color.parseColor("#13141F"));
+                imgBg.setCornerRadius(dpToPx(8));
+                coverThumb.setBackground(imgBg);
+                coverThumb.setClipToOutline(true);
             } else {
-                // Mini placeholder circle/square
+                // Mini placeholder with 🎮 icon
                 GradientDrawable thumbBg = new GradientDrawable();
-                thumbBg.setColor(Color.parseColor("#0D0D0F"));
-                thumbBg.setCornerRadius(dpToPx(6));
-                thumbBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
+                thumbBg.setColor(Color.parseColor("#0D0D14"));
+                thumbBg.setCornerRadius(dpToPx(8));
+                thumbBg.setStroke(dpToPx(1), Color.parseColor("#252538"));
                 coverThumb.setBackground(thumbBg);
-                coverThumb.setImageResource(android.R.drawable.ic_menu_gallery);
+                coverThumb.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+                coverThumb.setImageResource(android.R.drawable.ic_media_play);
             }
-            // Clear prior views before drawing to prevent duplicates
-            itemLayout.removeAllViews();
             itemLayout.addView(coverThumb);
 
             // 2. Text layout on the right
@@ -936,14 +1066,14 @@ public class MainActivity extends AppCompatActivity {
 
             TextView nameText = new TextView(MainActivity.this);
             nameText.setText(displayName);
-            nameText.setTextColor(Color.parseColor("#E0E0FF"));
+            nameText.setTextColor(Color.parseColor("#E8E8FF")); // Text Primary
             nameText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
             nameText.setTypeface(Typeface.DEFAULT_BOLD);
             textLayout.addView(nameText);
 
             TextView pathText = new TextView(MainActivity.this);
             pathText.setText(path);
-            pathText.setTextColor(Color.parseColor("#666680"));
+            pathText.setTextColor(Color.parseColor("#9090B0")); // Text Secondary
             pathText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
             pathText.setSingleLine(true);
             pathText.setEllipsize(TextUtils.TruncateAt.MIDDLE);
@@ -956,6 +1086,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private Bitmap loadCover(String gameFileName) {
+        Bitmap cached = coverCache.get(gameFileName);
+        if (cached != null) return cached;
+
         File localRoot = getExternalFilesDir(null);
         if (localRoot == null) localRoot = getFilesDir();
         File coversDir = new File(localRoot, StorageHelper.SUBFOLDER_COVERS);
@@ -964,9 +1097,13 @@ public class MainActivity extends AppCompatActivity {
             File cover1 = new File(coversDir, baseName + ".png");
             File cover2 = new File(coversDir, gameFileName + ".png");
             if (cover1.exists()) {
-                return BitmapFactory.decodeFile(cover1.getAbsolutePath());
+                Bitmap bmp = BitmapFactory.decodeFile(cover1.getAbsolutePath());
+                if (bmp != null) coverCache.put(gameFileName, bmp);
+                return bmp;
             } else if (cover2.exists()) {
-                return BitmapFactory.decodeFile(cover2.getAbsolutePath());
+                Bitmap bmp = BitmapFactory.decodeFile(cover2.getAbsolutePath());
+                if (bmp != null) coverCache.put(gameFileName, bmp);
+                return bmp;
             }
         }
         return null;

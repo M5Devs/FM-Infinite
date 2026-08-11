@@ -24,6 +24,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #include <stdarg.h>
 #include <cstdio>
 #include <map>
+#include <cstdint>
 
 #include "towns.h"
 #include "townsthread.h"
@@ -72,11 +73,34 @@ private:
     TownsRender::ImageCopy latestImage;
 };
 
-// Custom Sound Interface for Android (using template NoSoundConnection structure)
+// Globals for JNI Audio Integration
+static JavaVM* g_jvm = nullptr;
+static jobject g_audio_bridge = nullptr;
+static jmethodID g_writePCM_mid = nullptr;
+
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    return JNI_VERSION_1_6;
+}
+
+// Custom Sound Interface for Android with real mixing and streaming
 class AndroidSound : public Outside_World::Sound
 {
 public:
     std::chrono::time_point<std::chrono::high_resolution_clock> FMPCMReadyTime, BeepReadyTime;
+
+    // CDDA state
+    std::vector<unsigned char> cdda_wave;
+    uint64_t cdda_play_pointer = 0;
+    bool cdda_playing = false;
+    bool cdda_repeat = false;
+    float cdda_left_vol = 1.0f;
+    float cdda_right_vol = 1.0f;
+
+    // Beep state
+    std::vector<unsigned char> beep_wave;
+    uint64_t beep_play_pointer = 0;
+    bool beep_playing = false;
 
     AndroidSound()
     {
@@ -88,21 +112,123 @@ public:
     void Stop(void) override {}
     void Polling(void) override {}
 
-    void CDDAPlay(const DiscImage &discImg, DiscImage::MinSecFrm from, DiscImage::MinSecFrm to, bool repeat, unsigned int, unsigned int) override {}
-    void CDDASetVolume(float leftVol, float rightVol) override {}
-    void CDDAStop(void) override {}
-    void CDDAPause(void) override {}
-    void CDDAResume(void) override {}
-    bool CDDAIsPlaying(void) override { return false; }
+    void CDDAPlay(const DiscImage &discImg, DiscImage::MinSecFrm from, DiscImage::MinSecFrm to, bool repeat, unsigned int, unsigned int) override
+    {
+        cdda_wave = discImg.GetWave(from, to);
+        cdda_play_pointer = 0;
+        cdda_playing = true;
+        cdda_repeat = repeat;
+    }
+    void CDDASetVolume(float leftVol, float rightVol) override
+    {
+        cdda_left_vol = leftVol;
+        cdda_right_vol = rightVol;
+    }
+    void CDDAStop(void) override
+    {
+        cdda_playing = false;
+    }
+    void CDDAPause(void) override
+    {
+        cdda_playing = false;
+    }
+    void CDDAResume(void) override
+    {
+        cdda_playing = true;
+    }
+    bool CDDAIsPlaying(void) override
+    {
+        return cdda_playing && (cdda_play_pointer < cdda_wave.size() || cdda_repeat);
+    }
     DiscImage::MinSecFrm CDDACurrentPosition(void) override
     {
         DiscImage::MinSecFrm msf;
-        msf.FromHSG(0);
+        uint32_t sector_offset = cdda_play_pointer / 2352;
+        msf.FromHSG(sector_offset);
         return msf;
+    }
+
+    void MixStereoPCM(std::vector<unsigned char> &dst, const std::vector<unsigned char> &src, uint64_t &src_ptr, bool repeat, float left_vol = 1.0f, float right_vol = 1.0f)
+    {
+        if (src.empty()) return;
+        int16_t *dst16 = reinterpret_cast<int16_t*>(dst.data());
+        const int16_t *src16 = reinterpret_cast<const int16_t*>(src.data());
+        size_t num_samples = dst.size() / 4; // 1 sample = 4 bytes (L + R)
+        size_t src_num_samples = src.size() / 4;
+        uint64_t src_sample_ptr = src_ptr / 4;
+
+        for (size_t i = 0; i < num_samples; ++i) {
+            if (src_sample_ptr >= src_num_samples) {
+                if (repeat) {
+                    src_sample_ptr = 0;
+                } else {
+                    break;
+                }
+            }
+
+            int16_t src_l = src16[src_sample_ptr * 2];
+            int16_t src_r = src16[src_sample_ptr * 2 + 1];
+
+            // Apply volume
+            src_l = static_cast<int16_t>(src_l * left_vol);
+            src_r = static_cast<int16_t>(src_r * right_vol);
+
+            // Mix Left channel
+            int32_t mixed_l = dst16[i * 2] + src_l;
+            if (mixed_l > 32767) mixed_l = 32767;
+            else if (mixed_l < -32768) mixed_l = -32768;
+            dst16[i * 2] = static_cast<int16_t>(mixed_l);
+
+            // Mix Right channel
+            int32_t mixed_r = dst16[i * 2 + 1] + src_r;
+            if (mixed_r > 32767) mixed_r = 32767;
+            else if (mixed_r < -32768) mixed_r = -32768;
+            dst16[i * 2 + 1] = static_cast<int16_t>(mixed_r);
+
+            src_sample_ptr++;
+        }
+        src_ptr = src_sample_ptr * 4;
     }
 
     void FMPCMPlay(std::vector<unsigned char> &wave) override
     {
+        // Mix CDDA if playing
+        if (cdda_playing && !cdda_wave.empty()) {
+            MixStereoPCM(wave, cdda_wave, cdda_play_pointer, cdda_repeat, cdda_left_vol, cdda_right_vol);
+        }
+
+        // Mix Beep if playing
+        if (beep_playing && !beep_wave.empty()) {
+            MixStereoPCM(wave, beep_wave, beep_play_pointer, false);
+            if (beep_play_pointer >= beep_wave.size()) {
+                beep_playing = false;
+            }
+        }
+
+        // Send to Java AudioBridge
+        if (g_jvm && g_audio_bridge && g_writePCM_mid && !wave.empty()) {
+            JNIEnv* env = nullptr;
+            bool attached = false;
+            jint res = g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6);
+            if (res == JNI_EDETACHED) {
+                res = g_jvm->AttachCurrentThread(&env, nullptr);
+                if (res == JNI_OK) {
+                    attached = true;
+                }
+            }
+            if (env != nullptr) {
+                jbyteArray arr = env->NewByteArray(wave.size());
+                if (arr != nullptr) {
+                    env->SetByteArrayRegion(arr, 0, wave.size(), reinterpret_cast<const jbyte*>(wave.data()));
+                    env->CallVoidMethod(g_audio_bridge, g_writePCM_mid, arr);
+                    env->DeleteLocalRef(arr);
+                }
+                if (attached) {
+                    g_jvm->DetachCurrentThread();
+                }
+            }
+        }
+
         auto num_samples = wave.size() / 4;
         auto microsec = 10000 * num_samples / 441;
         FMPCMReadyTime = std::chrono::high_resolution_clock::now() + std::chrono::microseconds(microsec);
@@ -115,11 +241,18 @@ public:
 
     void BeepPlay(int samplingRate, std::vector<unsigned char> &wave) override
     {
+        beep_wave = wave;
+        beep_play_pointer = 0;
+        beep_playing = true;
+
         auto num_samples = wave.size() / 4;
         auto microsec = 10000 * num_samples / 441;
         BeepReadyTime = std::chrono::high_resolution_clock::now() + std::chrono::microseconds(microsec);
     }
-    void BeepPlayStop() override {}
+    void BeepPlayStop() override
+    {
+        beep_playing = false;
+    }
     bool BeepChannelPlaying() const override
     {
         return std::chrono::high_resolution_clock::now() < BeepReadyTime;
@@ -207,6 +340,23 @@ std::string GetBIOSFileMapping(const std::string &dirName, const std::string &de
 }
 
 extern "C" {
+
+JNIEXPORT void JNICALL
+Java_com_m5dev_fminfinite_EmulatorCore_nativeInitAudio(JNIEnv *env, jclass clazz, jobject audioBridgeObj)
+{
+    if (g_audio_bridge != nullptr) {
+        env->DeleteGlobalRef(g_audio_bridge);
+        g_audio_bridge = nullptr;
+    }
+    if (audioBridgeObj != nullptr) {
+        g_audio_bridge = env->NewGlobalRef(audioBridgeObj);
+        jclass cls = env->GetObjectClass(g_audio_bridge);
+        g_writePCM_mid = env->GetMethodID(cls, "writePCM", "([B)V");
+    } else {
+        g_writePCM_mid = nullptr;
+    }
+    write_to_log("C++: nativeInitAudio initialized successfully");
+}
 
 JNIEXPORT void JNICALL
 Java_com_m5dev_fminfinite_EmulatorCore_nativeSetBIOSMode(JNIEnv *env, jclass clazz, jint mode)
@@ -621,6 +771,12 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeShutdown(JNIEnv *env, jobject thiz)
 {
     std::lock_guard<std::mutex> lock(g_vm_mutex);
     LOGI("nativeShutdown called");
+
+    if (g_audio_bridge != nullptr) {
+        env->DeleteGlobalRef(g_audio_bridge);
+        g_audio_bridge = nullptr;
+        g_writePCM_mid = nullptr;
+    }
 
     if (g_towns == nullptr) return;
 

@@ -73,6 +73,9 @@ public class EmulatorActivity extends AppCompatActivity {
     private LinearLayout keyboardContainer;
     private FrameLayout quickMenuOverlay;
 
+    // Audio Bridge
+    private AudioBridge audioBridge;
+
     // Running states
     private volatile boolean isRunning = false;
     private boolean isCoreInitialized = false;
@@ -103,10 +106,14 @@ public class EmulatorActivity extends AppCompatActivity {
                 lastFrameTime = System.nanoTime();
 
                 EmulatorCore.nativeRunFrame();
-                if (surfaceView != null) {
-                    surfaceView.drawFrame();
-                } else if (gpuView != null) {
-                    gpuView.drawFrame();
+
+                // Use local snapshot to avoid race with fallbackToSoftware
+                EmulatorSurfaceView sv = surfaceView;
+                EmulatorGLSurfaceView gv = gpuView;
+                if (sv != null) {
+                    sv.drawFrame();
+                } else if (gv != null) {
+                    gv.drawFrame();
                 }
 
                 fpsFrameCount++;
@@ -176,13 +183,44 @@ public class EmulatorActivity extends AppCompatActivity {
     private float virtualPadOpacity = 0.7f;
     private String virtualPadSize = "medium";
 
+    // Auto-hide Top Bar
+    private final Handler autoHideHandler = new Handler();
+    private final Runnable hideTopBarRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (statusMenuBar != null) {
+                statusMenuBar.animate()
+                    .alpha(0.0f)
+                    .setDuration(300)
+                    .withEndAction(() -> statusMenuBar.setVisibility(View.GONE))
+                    .start();
+            }
+        }
+    };
+
+    private void showTopBar() {
+        if (statusMenuBar != null) {
+            statusMenuBar.setVisibility(View.VISIBLE);
+            statusMenuBar.animate()
+                .alpha(1.0f)
+                .setDuration(300)
+                .start();
+            resetTopBarTimer();
+        }
+    }
+
+    private void resetTopBarTimer() {
+        autoHideHandler.removeCallbacks(hideTopBarRunnable);
+        autoHideHandler.postDelayed(hideTopBarRunnable, 3000); // 3 seconds
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         FileLogger.init(this);
         FileLogger.log("Java: EmulatorActivity onCreate called");
 
-        // Keep screen on
+        // Keep screen on & fullscreen
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
 
@@ -194,7 +232,12 @@ public class EmulatorActivity extends AppCompatActivity {
         // Load Settings
         loadSettings();
 
-        // Dynamically set content view and initialize/populate all elements based on current orientation
+        // Initialize AudioBridge
+        audioBridge = new AudioBridge();
+        audioBridge.init();
+        EmulatorCore.nativeInitAudio(audioBridge);
+
+        // Dynamically set programmatic view based on current orientation
         updateLayoutForOrientation(getResources().getConfiguration().orientation);
 
         // Initialize core and start emulation loop on background thread
@@ -204,68 +247,126 @@ public class EmulatorActivity extends AppCompatActivity {
     private void updateLayoutForOrientation(int orientation) {
         boolean isLandscape = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE);
 
-        setContentView(isLandscape ? R.layout.activity_emulator_landscape : R.layout.activity_emulator_portrait);
+        // PPSSPP Design: Fully programmatic overlays on top of a single root FrameLayout
+        rootLayout = new FrameLayout(this);
+        rootLayout.setBackgroundColor(Color.parseColor("#0D0D14")); // Near-black with blue tint
 
-        rootLayout = findViewById(R.id.root_layout);
-        keyboardContainer = findViewById(R.id.keyboard_container);
-        statusMenuBar = findViewById(R.id.status_menu_bar);
-        controlsArea = findViewById(R.id.controls_area);
-        quickMenuOverlay = findViewById(R.id.quick_menu_overlay);
+        // 1. Game surface wrapper (Base layer)
+        FrameLayout surfaceWrapper = new FrameLayout(this);
+        surfaceWrapper.setBackgroundColor(Color.BLACK);
+        rootLayout.addView(surfaceWrapper, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER
+        ));
 
         Config config = ConfigManager.loadConfig(this);
-        FrameLayout surfaceWrapper = findViewById(R.id.surface_wrapper);
-        if (surfaceWrapper != null) {
-            surfaceWrapper.removeAllViews();
-            if ("gpu".equals(config.renderer)) {
-                gpuView = new EmulatorGLSurfaceView(this);
-                gpuView.setOnRendererFailedListener(reason -> {
-                    Log.e(TAG, "GPU Renderer failed: " + reason);
-                    Toast.makeText(this, "GPU rendering failed, falling back to Software", Toast.LENGTH_LONG).show();
+        surfaceWrapper.removeAllViews();
+        if ("gpu".equals(config.renderer)) {
+            gpuView = new EmulatorGLSurfaceView(this);
+            gpuView.setOnRendererFailedListener(reason -> {
+                Log.e(TAG, "GPU Renderer failed: " + reason);
+                Toast.makeText(this, "GPU rendering failed, falling back to Software", Toast.LENGTH_LONG).show();
 
-                    Config failConfig = ConfigManager.loadConfig(this);
-                    failConfig.renderer = "software";
-                    ConfigManager.saveConfig(this, failConfig);
+                Config failConfig = ConfigManager.loadConfig(this);
+                failConfig.renderer = "software";
+                ConfigManager.saveConfig(this, failConfig);
 
-                    fallbackToSoftware();
-                });
-                surfaceWrapper.addView(gpuView, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        Gravity.CENTER
-                ));
-                surfaceView = null;
-            } else {
-                surfaceView = new EmulatorSurfaceView(this);
-                surfaceWrapper.addView(surfaceView, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        Gravity.CENTER
-                ));
-                gpuView = null;
-            }
+                fallbackToSoftware();
+            });
+            surfaceWrapper.addView(gpuView, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+            ));
+            surfaceView = null;
+        } else {
+            surfaceView = new EmulatorSurfaceView(this);
+            surfaceWrapper.addView(surfaceView, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.CENTER
+            ));
+            gpuView = null;
         }
+
+        // 2. Controls Area (Overlay layer)
+        controlsArea = new FrameLayout(this);
+        rootLayout.addView(controlsArea, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        // 3. Virtual Keyboard Container (Translucent overlay layer)
+        keyboardContainer = new LinearLayout(this);
+        keyboardContainer.setOrientation(LinearLayout.VERTICAL);
+        keyboardContainer.setBackgroundColor(Color.parseColor("#F0000000")); // Dark translucent
+        keyboardContainer.setPadding(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
+        keyboardContainer.setVisibility(View.GONE);
+        FrameLayout.LayoutParams kbParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM
+        );
+        rootLayout.addView(keyboardContainer, kbParams);
+
+        // 4. Status Menu Bar (Translucent top bar overlay)
+        statusMenuBar = new LinearLayout(this);
+        statusMenuBar.setOrientation(LinearLayout.HORIZONTAL);
+        statusMenuBar.setGravity(Gravity.CENTER_VERTICAL);
+        statusMenuBar.setBackgroundColor(Color.parseColor("#CC000000")); // 80% black, translucent
+        FrameLayout.LayoutParams barParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dpToPx(40) // Thin top bar: 40dp
+        );
+        barParams.gravity = Gravity.TOP;
+        rootLayout.addView(statusMenuBar, barParams);
+
+        // 5. Quick Menu Overlay (Top sheet translucent layer)
+        quickMenuOverlay = new FrameLayout(this);
+        quickMenuOverlay.setBackgroundColor(Color.parseColor("#AA000000"));
+        quickMenuOverlay.setVisibility(View.GONE);
+        rootLayout.addView(quickMenuOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        setContentView(rootLayout);
 
         setupSurfaceView();
         populateStatusMenuBar();
         populateControlsArea(isLandscape);
         updateKeyboardOverlay();
         populateQuickMenuOverlay();
+
+        // Reset auto-hide timer
+        resetTopBarTimer();
     }
 
     private void fallbackToSoftware() {
+        stopEmuThread(); // MUST stop before touching views
         runOnUiThread(() -> {
-            FrameLayout surfaceWrapper = findViewById(R.id.surface_wrapper);
-            if (surfaceWrapper != null) {
-                surfaceWrapper.removeAllViews();
-                gpuView = null;
-                surfaceView = new EmulatorSurfaceView(this);
-                surfaceView.setScreenFilterBilinear(screenFilterBilinear);
-                surfaceWrapper.addView(surfaceView, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        Gravity.CENTER
-                ));
-                setupSurfaceView();
+            // Find root layout dynamically
+            if (rootLayout != null) {
+                // Rebuild the surface wrapper specifically
+                // Let's locate the first child of rootLayout which is the surface wrapper
+                View firstChild = rootLayout.getChildAt(0);
+                if (firstChild instanceof FrameLayout) {
+                    FrameLayout surfaceWrapper = (FrameLayout) firstChild;
+                    surfaceWrapper.removeAllViews();
+                    gpuView = null;
+                    surfaceView = new EmulatorSurfaceView(this);
+                    surfaceView.setScreenFilterBilinear(screenFilterBilinear);
+                    surfaceWrapper.addView(surfaceView, new FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            Gravity.CENTER
+                    ));
+                    setupSurfaceView();
+                    if (isCoreInitialized) {
+                        startEmuThread(); // Restart only after surface is ready
+                    }
+                }
             }
         });
     }
@@ -281,61 +382,48 @@ public class EmulatorActivity extends AppCompatActivity {
     private void populateStatusMenuBar() {
         if (statusMenuBar == null) return;
         statusMenuBar.removeAllViews();
-        statusMenuBar.setOrientation(LinearLayout.HORIZONTAL);
-        statusMenuBar.setBackgroundColor(Color.parseColor("#111318"));
-        statusMenuBar.setGravity(Gravity.CENTER_VERTICAL);
+        statusMenuBar.setPadding(dpToPx(12), 0, dpToPx(12), 0);
 
-        // Left ⌨️ button
-        kbToggleBtn = new TextView(this);
-        kbToggleBtn.setText("⌨️");
-        kbToggleBtn.setGravity(Gravity.CENTER);
-        kbToggleBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
-        kbToggleBtn.setPadding(dpToPx(16), 0, dpToPx(16), 0);
-        LinearLayout.LayoutParams kbParams = new LinearLayout.LayoutParams(
-                dpToPx(56), ViewGroup.LayoutParams.MATCH_PARENT
-        );
-        kbToggleBtn.setLayoutParams(kbParams);
-        kbToggleBtn.setOnClickListener(v -> cycleKeyboardState());
-        statusMenuBar.addView(kbToggleBtn);
+        // Left: Back button
+        TextView backBtn = new TextView(this);
+        backBtn.setText("←");
+        backBtn.setTextColor(Color.parseColor("#E8E8FF")); // Text Primary
+        backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        backBtn.setPadding(dpToPx(8), dpToPx(4), dpToPx(16), dpToPx(4));
+        backBtn.setOnClickListener(v -> showExitConfirmation());
+        statusMenuBar.addView(backBtn);
 
-        // Centered info layout (Name & FPS)
-        LinearLayout infoCenter = new LinearLayout(this);
-        infoCenter.setOrientation(LinearLayout.VERTICAL);
-        infoCenter.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams infoParams = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f
-        );
-        infoCenter.setLayoutParams(infoParams);
-
+        // Center: Game Name
         gameNameText = new TextView(this);
         gameNameText.setText(gameName);
-        gameNameText.setTextColor(Color.parseColor("#E0E0FF"));
+        gameNameText.setTextColor(Color.parseColor("#E8E8FF")); // Text Primary
         gameNameText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         gameNameText.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         gameNameText.setSingleLine(true);
-        infoCenter.addView(gameNameText);
+        gameNameText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        LinearLayout.LayoutParams nameParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f
+        );
+        nameParams.leftMargin = dpToPx(8);
+        gameNameText.setLayoutParams(nameParams);
+        statusMenuBar.addView(gameNameText);
 
+        // Right: FPS counter
         fpsCounterText = new TextView(this);
         fpsCounterText.setText("0 FPS");
-        fpsCounterText.setTextColor(Color.parseColor("#7B6FFF"));
-        fpsCounterText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        fpsCounterText.setTextColor(Color.parseColor("#7B68EE")); // Primary color
+        fpsCounterText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         fpsCounterText.setTypeface(Typeface.MONOSPACE);
+        fpsCounterText.setPadding(dpToPx(8), 0, dpToPx(16), 0);
         fpsCounterText.setVisibility(showFps ? View.VISIBLE : View.GONE);
-        infoCenter.addView(fpsCounterText);
+        statusMenuBar.addView(fpsCounterText);
 
-        statusMenuBar.addView(infoCenter);
-
-        // Right ☰ menu button
+        // Right: Menu Button
         menuOpenBtn = new TextView(this);
         menuOpenBtn.setText("☰");
-        menuOpenBtn.setTextColor(Color.parseColor("#7B6FFF"));
-        menuOpenBtn.setGravity(Gravity.CENTER);
-        menuOpenBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
-        menuOpenBtn.setPadding(dpToPx(16), 0, dpToPx(16), 0);
-        LinearLayout.LayoutParams menuParams = new LinearLayout.LayoutParams(
-                dpToPx(56), ViewGroup.LayoutParams.MATCH_PARENT
-        );
-        menuOpenBtn.setLayoutParams(menuParams);
+        menuOpenBtn.setTextColor(Color.parseColor("#7B68EE")); // Primary color
+        menuOpenBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        menuOpenBtn.setPadding(dpToPx(12), dpToPx(4), dpToPx(12), dpToPx(4));
         menuOpenBtn.setOnClickListener(v -> toggleQuickMenu());
         statusMenuBar.addView(menuOpenBtn);
     }
@@ -361,6 +449,9 @@ public class EmulatorActivity extends AppCompatActivity {
 
         if (activeView != null) {
             activeView.setOnTouchListener((v, event) -> {
+                // Show top bar on touch
+                showTopBar();
+
                 int action = event.getAction();
                 if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_UP) {
                     int viewWidth = activeView.getWidth();
@@ -385,11 +476,13 @@ public class EmulatorActivity extends AppCompatActivity {
                         float relativeX = touchX - left;
                         float relativeY = touchY - top;
 
-                        int mouseX = Math.round((relativeX / scaledWidth) * width);
-                        int mouseY = Math.round((relativeY / scaledHeight) * height);
+                        // Ignore touches outside the game viewport
+                        if (relativeX < 0 || relativeY < 0 || relativeX > scaledWidth || relativeY > scaledHeight) {
+                            return true; // Consume event but don't send to emulator
+                        }
 
-                        mouseX = Math.max(0, Math.min(639, mouseX));
-                        mouseY = Math.max(0, Math.min(479, mouseY));
+                        int mouseX = Math.max(0, Math.min(639, Math.round((relativeX / scaledWidth) * 640)));
+                        int mouseY = Math.max(0, Math.min(479, Math.round((relativeY / scaledHeight) * 480)));
 
                         int clickState = 0;
                         if (action != MotionEvent.ACTION_UP) {
@@ -409,195 +502,199 @@ public class EmulatorActivity extends AppCompatActivity {
     private void populateControlsArea(boolean isLandscape) {
         if (controlsArea == null) return;
         controlsArea.removeAllViews();
-        controlsArea.setBackgroundColor(Color.parseColor("#0D0D0F"));
 
-        // Authentic FM Towns Marty layout gamepad area
-        setupVirtualGamepad(isLandscape);
-        controlsArea.addView(virtualPadContainer);
-    }
-
-    private void setupVirtualGamepad(boolean isLandscape) {
         virtualPadContainer = new RelativeLayout(this);
         virtualPadContainer.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
         ));
         virtualPadContainer.setAlpha(virtualPadOpacity);
+        controlsArea.addView(virtualPadContainer);
 
-        // Get screen height / width to dynamically adjust scale for small devices
-        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
-        float screenHeightDp = metrics.heightPixels / metrics.density;
-
-        // Adjust dimensions based on SharedPreferences size setting
-        float scale = 1.0f;
-        if ("small".equals(virtualPadSize)) {
-            scale = 0.82f;
-        } else if ("large".equals(virtualPadSize)) {
-            scale = 1.15f;
-        }
-
-        // If on small device, scale down to avoid overlap with game screen
-        if (isLandscape) {
-            if (screenHeightDp < 400) {
-                scale *= 0.8f;
-            }
-        } else {
-            if (screenHeightDp < 650) {
-                scale *= 0.8f;
-            }
-        }
-
-        // Adjust controlsArea layout parameters dynamically
-        if (!isLandscape && controlsArea != null) {
-            ViewGroup.LayoutParams lp = controlsArea.getLayoutParams();
-            if (screenHeightDp < 650) {
-                lp.height = dpToPx(180);
-            } else {
-                lp.height = dpToPx(240);
-            }
-            controlsArea.setLayoutParams(lp);
-        }
-
-        int dpadSize = (int) (dpToPx(140) * scale);
-
-        // 1. LEFT SIDE: D-Pad (cross style)
+        // Classic 4-direction cross style D-Pad (like PPSSPP)
+        int dpadContainerSize = dpToPx(108);
         RelativeLayout dpadLayout = new RelativeLayout(this);
         RelativeLayout.LayoutParams dpadParams = new RelativeLayout.LayoutParams(
-                dpadSize, dpadSize
+                dpadContainerSize, dpadContainerSize
         );
-        if (isLandscape) {
-            dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-            dpadParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
-            dpadParams.topMargin = dpToPx(16);
-            dpadParams.leftMargin = dpToPx(12);
-        } else {
-            dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
-            dpadParams.addRule(RelativeLayout.CENTER_VERTICAL);
-            dpadParams.leftMargin = dpToPx(16);
-        }
+        dpadParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+        dpadParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+        dpadParams.leftMargin = dpToPx(20);
+        dpadParams.bottomMargin = dpToPx(20);
         dpadLayout.setLayoutParams(dpadParams);
 
-        int btnSize = dpadSize / 3;
+        int armSize = dpToPx(44);
+        int hubSize = dpToPx(20);
 
-        View upBtn = createVirtualButton("▲", 1 << 4, Color.parseColor("#7B6FFF"));
-        RelativeLayout.LayoutParams upParams = new RelativeLayout.LayoutParams(btnSize, btnSize);
+        View upBtn = createPPSSPPButton("▲", 1 << 4, Color.parseColor("#7B68EE"));
+        RelativeLayout.LayoutParams upParams = new RelativeLayout.LayoutParams(armSize, armSize);
         upParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
         upParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
         upBtn.setLayoutParams(upParams);
         dpadLayout.addView(upBtn);
 
-        View downBtn = createVirtualButton("▼", 1 << 5, Color.parseColor("#7B6FFF"));
-        RelativeLayout.LayoutParams downParams = new RelativeLayout.LayoutParams(btnSize, btnSize);
+        View downBtn = createPPSSPPButton("▼", 1 << 5, Color.parseColor("#7B68EE"));
+        RelativeLayout.LayoutParams downParams = new RelativeLayout.LayoutParams(armSize, armSize);
         downParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
         downParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
         downBtn.setLayoutParams(downParams);
         dpadLayout.addView(downBtn);
 
-        View leftBtn = createVirtualButton("◀", 1 << 2, Color.parseColor("#7B6FFF"));
-        RelativeLayout.LayoutParams leftParams = new RelativeLayout.LayoutParams(btnSize, btnSize);
+        View leftBtn = createPPSSPPButton("◀", 1 << 2, Color.parseColor("#7B68EE"));
+        RelativeLayout.LayoutParams leftParams = new RelativeLayout.LayoutParams(armSize, armSize);
         leftParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
         leftParams.addRule(RelativeLayout.CENTER_VERTICAL);
         leftBtn.setLayoutParams(leftParams);
         dpadLayout.addView(leftBtn);
 
-        View rightBtn = createVirtualButton("▶", 1 << 3, Color.parseColor("#7B6FFF"));
-        RelativeLayout.LayoutParams rightParams = new RelativeLayout.LayoutParams(btnSize, btnSize);
+        View rightBtn = createPPSSPPButton("▶", 1 << 3, Color.parseColor("#7B68EE"));
+        RelativeLayout.LayoutParams rightParams = new RelativeLayout.LayoutParams(armSize, armSize);
         rightParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
         rightParams.addRule(RelativeLayout.CENTER_VERTICAL);
         rightBtn.setLayoutParams(rightParams);
         dpadLayout.addView(rightBtn);
 
+        // Center circular hub
+        View hub = new View(this);
+        GradientDrawable hubBg = new GradientDrawable();
+        hubBg.setShape(GradientDrawable.OVAL);
+        hubBg.setColor(Color.parseColor("#BB1A1A2E"));
+        hubBg.setStroke(dpToPx(1), Color.parseColor("#7B68EE"));
+        hub.setBackground(hubBg);
+        RelativeLayout.LayoutParams hubParams = new RelativeLayout.LayoutParams(hubSize, hubSize);
+        hubParams.addRule(RelativeLayout.CENTER_IN_PARENT);
+        hub.setLayoutParams(hubParams);
+        dpadLayout.addView(hub);
+
         virtualPadContainer.addView(dpadLayout);
 
-        // 2. RIGHT SIDE: Only 2 buttons in vertical layout (A: Red Top, B: Blue Bottom)
-        LinearLayout rightBtnsLayout = new LinearLayout(this);
-        rightBtnsLayout.setOrientation(LinearLayout.VERTICAL);
-        rightBtnsLayout.setGravity(Gravity.CENTER_HORIZONTAL);
-        RelativeLayout.LayoutParams rightBtnsParams = new RelativeLayout.LayoutParams(
-                (int) (dpToPx(72) * scale), ViewGroup.LayoutParams.WRAP_CONTENT
+        // Right Side: Action Buttons (A: Red top, B: Blue bottom)
+        LinearLayout actionLayout = new LinearLayout(this);
+        actionLayout.setOrientation(LinearLayout.VERTICAL);
+        actionLayout.setGravity(Gravity.CENTER_HORIZONTAL);
+        RelativeLayout.LayoutParams actionParams = new RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        if (isLandscape) {
-            rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-            rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
-            rightBtnsParams.topMargin = dpToPx(16);
-            rightBtnsParams.rightMargin = dpToPx(12);
-        } else {
-            rightBtnsParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
-            rightBtnsParams.addRule(RelativeLayout.CENTER_VERTICAL);
-            rightBtnsParams.rightMargin = dpToPx(24);
-        }
-        rightBtnsLayout.setLayoutParams(rightBtnsParams);
+        actionParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT);
+        actionParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+        actionParams.rightMargin = dpToPx(20);
+        actionParams.bottomMargin = dpToPx(20);
+        actionLayout.setLayoutParams(actionParams);
 
-        int actBtnSize = (int) (dpToPx(52) * scale);
+        int actBtnSize = dpToPx(52);
+        int actGap = dpToPx(12);
 
-        // A Button (Red, Top) -> bitmask 1 << 0
-        View aBtn = createCircularGamepadBtn("A", 1 << 0, Color.parseColor("#FF4D4D"));
+        View aBtn = createPPSSPPActionButton("A", 1 << 0, Color.parseColor("#FF4D4D"));
         LinearLayout.LayoutParams aParams = new LinearLayout.LayoutParams(actBtnSize, actBtnSize);
-        aParams.bottomMargin = dpToPx(16);
+        aParams.bottomMargin = actGap;
         aBtn.setLayoutParams(aParams);
-        rightBtnsLayout.addView(aBtn);
+        actionLayout.addView(aBtn);
 
-        // B Button (Blue, Bottom) -> bitmask 1 << 1
-        View bBtn = createCircularGamepadBtn("B", 1 << 1, Color.parseColor("#4D94FF"));
+        View bBtn = createPPSSPPActionButton("B", 1 << 1, Color.parseColor("#4D94FF"));
         LinearLayout.LayoutParams bParams = new LinearLayout.LayoutParams(actBtnSize, actBtnSize);
         bBtn.setLayoutParams(bParams);
-        rightBtnsLayout.addView(bBtn);
+        actionLayout.addView(bBtn);
 
-        virtualPadContainer.addView(rightBtnsLayout);
+        virtualPadContainer.addView(actionLayout);
 
-        // 3. CENTER: SELECT, RUN (start), SAVE (💾), LOAD (📂)
-        LinearLayout centerBtns = new LinearLayout(this);
-        centerBtns.setOrientation(LinearLayout.HORIZONTAL);
-        centerBtns.setGravity(Gravity.CENTER);
+        // Keyboard Toggle (⌨️) positioned top-left
+        kbToggleBtn = new TextView(this);
+        kbToggleBtn.setText("⌨️");
+        kbToggleBtn.setTextColor(keyboardState > 0 ? Color.parseColor("#7B68EE") : Color.parseColor("#9090B0"));
+        kbToggleBtn.setGravity(Gravity.CENTER);
+        kbToggleBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        GradientDrawable kbtBg = new GradientDrawable();
+        kbtBg.setColor(Color.parseColor("#BB1A1A2E"));
+        kbtBg.setStroke(dpToPx(1), Color.parseColor("#7B68EE"));
+        kbtBg.setCornerRadius(dpToPx(16)); // Pill shape
+        kbToggleBtn.setBackground(kbtBg);
+        RelativeLayout.LayoutParams kbtParams = new RelativeLayout.LayoutParams(dpToPx(40), dpToPx(32));
+        kbtParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+        kbtParams.addRule(RelativeLayout.ALIGN_PARENT_TOP);
+        kbtParams.leftMargin = dpToPx(20);
+        kbtParams.topMargin = dpToPx(60); // below top bar level
+        kbToggleBtn.setLayoutParams(kbtParams);
+        kbToggleBtn.setOnClickListener(v -> cycleKeyboardState());
+        virtualPadContainer.addView(kbToggleBtn);
+
+        // Center Controls: SEL, RUN, SAVE, LOAD
+        LinearLayout centerLayout = new LinearLayout(this);
+        centerLayout.setOrientation(LinearLayout.HORIZONTAL);
+        centerLayout.setGravity(Gravity.CENTER);
         RelativeLayout.LayoutParams centerParams = new RelativeLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        if (isLandscape) {
-            centerParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
-            centerParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
-            centerParams.bottomMargin = dpToPx(16);
-        } else {
-            centerParams.addRule(RelativeLayout.CENTER_IN_PARENT);
-        }
-        centerBtns.setLayoutParams(centerParams);
+        centerParams.addRule(RelativeLayout.CENTER_HORIZONTAL);
+        centerParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+        centerParams.bottomMargin = dpToPx(20);
+        centerLayout.setLayoutParams(centerParams);
 
-        int centW = (int) (dpToPx(48) * scale);
-        int centH = (int) (dpToPx(36) * scale);
+        int pillW = dpToPx(44);
+        int pillH = dpToPx(32);
+        int pillW_wide = dpToPx(56);
 
-        // SELECT button
-        View selectBtn = createVirtualButton("SEL", 1 << 7, Color.parseColor("#808080"));
-        LinearLayout.LayoutParams selParams = new LinearLayout.LayoutParams(centW, centH);
+        View selectBtn = createPillButton("SEL", 1 << 7, Color.parseColor("#9090B0"));
+        LinearLayout.LayoutParams selParams = new LinearLayout.LayoutParams(pillW, pillH);
         selParams.rightMargin = dpToPx(6);
         selectBtn.setLayoutParams(selParams);
-        centerBtns.addView(selectBtn);
+        centerLayout.addView(selectBtn);
 
-        // RUN button (Start on FM Towns Marty)
-        View runBtn = createVirtualButton("RUN", 1 << 6, Color.parseColor("#808080"));
-        LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(centW, centH);
-        runParams.rightMargin = dpToPx(10);
+        View runBtn = createPillButton("RUN", 1 << 6, Color.parseColor("#9090B0"));
+        LinearLayout.LayoutParams runParams = new LinearLayout.LayoutParams(pillW, pillH);
+        runParams.rightMargin = dpToPx(12);
         runBtn.setLayoutParams(runParams);
-        centerBtns.addView(runBtn);
+        centerLayout.addView(runBtn);
 
-        // SAVE State button (Floppy 💾)
-        View saveBtn = createTextOnlyBtn("💾 SV", Color.parseColor("#7B6FFF"));
-        LinearLayout.LayoutParams savParams = new LinearLayout.LayoutParams((int)(dpToPx(56)*scale), centH);
+        View saveBtn = createPillButton("💾 SV", 0, Color.parseColor("#7B68EE"));
+        LinearLayout.LayoutParams savParams = new LinearLayout.LayoutParams(pillW_wide, pillH);
         savParams.rightMargin = dpToPx(6);
         saveBtn.setLayoutParams(savParams);
         saveBtn.setOnClickListener(v -> saveStatePrompt());
-        centerBtns.addView(saveBtn);
+        centerLayout.addView(saveBtn);
 
-        // LOAD State button (Floppy/Open 📂)
-        View loadBtn = createTextOnlyBtn("📂 LD", Color.parseColor("#7B6FFF"));
-        LinearLayout.LayoutParams loaParams = new LinearLayout.LayoutParams((int)(dpToPx(56)*scale), centH);
+        View loadBtn = createPillButton("📂 LD", 0, Color.parseColor("#7B68EE"));
+        LinearLayout.LayoutParams loaParams = new LinearLayout.LayoutParams(pillW_wide, pillH);
         loadBtn.setLayoutParams(loaParams);
         loadBtn.setOnClickListener(v -> loadStatePrompt());
-        centerBtns.addView(loadBtn);
+        centerLayout.addView(loadBtn);
 
-        virtualPadContainer.addView(centerBtns);
+        virtualPadContainer.addView(centerLayout);
     }
 
-    private View createCircularGamepadBtn(String label, int bitmask, int borderHex) {
+    private View createPPSSPPButton(String label, int bitmask, int borderHex) {
+        TextView btn = new TextView(this);
+        btn.setText(label);
+        btn.setTextColor(Color.parseColor("#E8E8FF"));
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        btn.setGravity(Gravity.CENTER);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#BB1A1A2E"));
+        bg.setCornerRadius(dpToPx(6));
+        bg.setStroke(dpToPx(1.5f), borderHex);
+        btn.setBackground(bg);
+
+        btn.setOnTouchListener((v, event) -> {
+            int action = event.getAction();
+            if (action == MotionEvent.ACTION_DOWN) {
+                v.setAlpha(0.4f);
+                currentGamepadMask |= bitmask;
+                EmulatorCore.nativeSendInput(1, currentGamepadMask, 0);
+            } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                v.setAlpha(1.0f);
+                currentGamepadMask &= ~bitmask;
+                EmulatorCore.nativeSendInput(1, currentGamepadMask, 0);
+            }
+            return true;
+        });
+
+        return btn;
+    }
+
+    private View createPPSSPPActionButton(String label, int bitmask, int borderHex) {
         TextView btn = new TextView(this);
         btn.setText(label);
         btn.setTextColor(Color.WHITE);
@@ -605,10 +702,9 @@ public class EmulatorActivity extends AppCompatActivity {
         btn.setGravity(Gravity.CENTER);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
 
-        // Circular background with border
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#D9111318"));
-        bg.setCornerRadius(dpToPx(28));
+        bg.setColor(Color.parseColor("#BB1A1A2E"));
+        bg.setCornerRadius(dpToPx(26)); // Circular
         bg.setStroke(dpToPx(2), borderHex);
         btn.setBackground(bg);
 
@@ -629,18 +725,18 @@ public class EmulatorActivity extends AppCompatActivity {
         return btn;
     }
 
-    private View createVirtualButton(String label, int bitmask, int borderHex) {
+    private View createPillButton(String label, int bitmask, int borderHex) {
         TextView btn = new TextView(this);
         btn.setText(label);
-        btn.setTextColor(Color.WHITE);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        btn.setTextColor(Color.parseColor("#9090B0")); // Text Secondary
+        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
         btn.setGravity(Gravity.CENTER);
-        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
 
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#D9111318"));
-        bg.setCornerRadius(dpToPx(20));
-        bg.setStroke(dpToPx(2), borderHex);
+        bg.setColor(Color.parseColor("#BB252538"));
+        bg.setCornerRadius(dpToPx(16)); // Pill shape
+        bg.setStroke(dpToPx(1), borderHex);
         btn.setBackground(bg);
 
         if (bitmask != 0) {
@@ -662,42 +758,42 @@ public class EmulatorActivity extends AppCompatActivity {
         return btn;
     }
 
-    private View createTextOnlyBtn(String label, int borderHex) {
-        TextView btn = new TextView(this);
-        btn.setText(label);
-        btn.setTextColor(Color.WHITE);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
-        btn.setGravity(Gravity.CENTER);
-        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
-
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#E6111318"));
-        bg.setCornerRadius(dpToPx(8));
-        bg.setStroke(dpToPx(1), borderHex);
-        btn.setBackground(bg);
-
-        return btn;
-    }
-
     private void cycleKeyboardState() {
         keyboardState = (keyboardState + 1) % 3; // Cycle: 0 -> 1 -> 2 -> 0
         updateKeyboardOverlay();
+        if (kbToggleBtn != null) {
+            kbToggleBtn.setTextColor(keyboardState > 0 ? Color.parseColor("#7B68EE") : Color.parseColor("#9090B0"));
+        }
     }
 
     private void updateKeyboardOverlay() {
         keyboardContainer.removeAllViews();
         if (keyboardState == 0) {
-            keyboardContainer.setVisibility(View.GONE);
-            kbToggleBtn.setTextColor(Color.WHITE);
+            if (keyboardContainer.getVisibility() == View.VISIBLE) {
+                android.view.animation.TranslateAnimation animate = new android.view.animation.TranslateAnimation(
+                        0, 0, 0, keyboardContainer.getHeight());
+                animate.setDuration(300);
+                animate.setAnimationListener(new android.view.animation.Animation.AnimationListener() {
+                    @Override public void onAnimationStart(android.view.animation.Animation animation) {}
+                    @Override public void onAnimationRepeat(android.view.animation.Animation animation) {}
+                    @Override public void onAnimationEnd(android.view.animation.Animation animation) {
+                        keyboardContainer.setVisibility(View.GONE);
+                    }
+                });
+                keyboardContainer.startAnimation(animate);
+            }
         } else {
-            keyboardContainer.setVisibility(View.VISIBLE);
-            kbToggleBtn.setTextColor(Color.parseColor("#7B6FFF")); // Highlight keyboard icon
+            if (keyboardContainer.getVisibility() != View.VISIBLE) {
+                keyboardContainer.setVisibility(View.VISIBLE);
+                android.view.animation.TranslateAnimation animate = new android.view.animation.TranslateAnimation(
+                        0, 0, 500, 0);
+                animate.setDuration(300);
+                keyboardContainer.startAnimation(animate);
+            }
 
             if (keyboardState == 1) {
-                // Basic mode
                 buildBasicKeyboard();
             } else {
-                // Full mode
                 buildFullKeyboard();
             }
         }
@@ -785,16 +881,16 @@ public class EmulatorActivity extends AppCompatActivity {
 
         // Key style matching instructions
         GradientDrawable kBg = new GradientDrawable();
-        kBg.setColor(Color.parseColor(isSpecial ? "#1F1F35" : "#1A1A28"));
-        kBg.setStroke(dpToPx(1), Color.parseColor("#2A2A3A"));
+        kBg.setColor(Color.parseColor(isSpecial ? "#1C1D2E" : "#13141F"));
+        kBg.setStroke(dpToPx(1), Color.parseColor("#252538"));
         kBg.setCornerRadius(dpToPx(6));
         key.setBackground(kBg);
 
-        key.setTextColor(Color.parseColor(isSpecial ? "#7B6FFF" : "#E0E0FF"));
+        key.setTextColor(Color.parseColor(isSpecial ? "#7B68EE" : "#E8E8FF"));
 
         // Height & Width constraints (min height 36dp)
         int keyHeight = dpToPx(38);
-        int keyWidth = "SPACE".equals(label) ? dpToPx(160) : dpToPx(42);
+        int keyWidth = "SPACE".equals(label) ? dpToPx(140) : dpToPx(42);
         if (label.length() > 3 && !"SPACE".equals(label)) {
             keyWidth = dpToPx(56);
         }
@@ -836,8 +932,6 @@ public class EmulatorActivity extends AppCompatActivity {
 
         LinearLayout panel = new LinearLayout(this);
         panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundColor(Color.parseColor("#111318"));
-        panel.setPadding(dpToPx(24), dpToPx(32), dpToPx(24), dpToPx(32));
         FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -845,93 +939,126 @@ public class EmulatorActivity extends AppCompatActivity {
         panelParams.gravity = Gravity.TOP;
         panel.setLayoutParams(panelParams);
 
+        // PPSSPP: Surface elevated bg with primary border and 16dp bottom radius
         GradientDrawable pbBg = new GradientDrawable();
-        pbBg.setColor(Color.parseColor("#111318"));
-        pbBg.setStroke(dpToPx(1), Color.parseColor("#7B6FFF"));
+        pbBg.setColor(Color.parseColor("#F0131421"));
+        pbBg.setCornerRadii(new float[]{0, 0, 0, 0, dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16)});
+        pbBg.setStroke(dpToPx(1.5f), Color.parseColor("#7B68EE"));
         panel.setBackground(pbBg);
 
         TextView menuTitle = new TextView(this);
-        menuTitle.setText("FM Infinite — Quick Menu");
-        menuTitle.setTextColor(Color.parseColor("#7B6FFF"));
-        menuTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        menuTitle.setText("Quick Menu");
+        menuTitle.setTextColor(Color.parseColor("#7B68EE"));
+        menuTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         menuTitle.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
         menuTitle.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams mtParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         );
-        mtParams.bottomMargin = dpToPx(24);
+        mtParams.topMargin = dpToPx(16);
+        mtParams.bottomMargin = dpToPx(16);
         menuTitle.setLayoutParams(mtParams);
         panel.addView(menuTitle);
 
-        addButtonToPanel(panel, getString(R.string.quick_save_state), v -> saveStatePrompt());
-        addButtonToPanel(panel, getString(R.string.quick_load_state), v -> loadStatePrompt());
-        addButtonToPanel(panel, getString(R.string.quick_reset), v -> {
+        addButtonToPanel(panel, "💾", "Save State", v -> saveStatePrompt());
+        addButtonToPanel(panel, "📂", "Load State", v -> loadStatePrompt());
+        addButtonToPanel(panel, "🔄", "Toggle Auto-Rotate", v -> {
+            int current = android.provider.Settings.System.getInt(
+                getContentResolver(),
+                android.provider.Settings.System.ACCELEROMETER_ROTATION, 0);
+            if (current == 1) {
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LOCKED);
+                Toast.makeText(this, "Auto-Rotate: OFF (Locked)", Toast.LENGTH_SHORT).show();
+            } else {
+                setRequestedOrientation(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
+                Toast.makeText(this, "Auto-Rotate: ON", Toast.LENGTH_SHORT).show();
+            }
+            toggleQuickMenu();
+        });
+        addButtonToPanel(panel, "⚙️", "Settings", v -> {
+            toggleQuickMenu();
+            Intent intent = new Intent(this, SettingsActivity.class);
+            startActivity(intent);
+        });
+        addButtonToPanel(panel, "🔃", "Reset Emulator", v -> {
             EmulatorCore.nativeShutdown();
             initCoreAndLoad();
             toggleQuickMenu();
             Toast.makeText(this, "Emulator Reset Complete", Toast.LENGTH_SHORT).show();
         });
-        addButtonToPanel(panel, getString(R.string.quick_settings), v -> {
-            toggleQuickMenu();
-            Intent intent = new Intent(this, SettingsActivity.class);
-            startActivity(intent);
-        });
-        addButtonToPanel(panel, getString(R.string.quick_exit), v -> showExitConfirmation());
+        addButtonToPanel(panel, "✕", "Exit Game", v -> showExitConfirmation());
 
-        TextView closeBtn = new TextView(this);
-        closeBtn.setText("Dismiss Menu ✕");
-        closeBtn.setTextColor(Color.parseColor("#666680"));
-        closeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        closeBtn.setGravity(Gravity.CENTER);
-        closeBtn.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(12));
-        closeBtn.setOnClickListener(v -> toggleQuickMenu());
-        LinearLayout.LayoutParams cbParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        cbParams.topMargin = dpToPx(16);
-        closeBtn.setLayoutParams(cbParams);
-        panel.addView(closeBtn);
-
-        quickMenuOverlay.addView(panel);
-
+        // Tap outside panel to dismiss
         quickMenuOverlay.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                toggleQuickMenu();
-                return true;
+                if (event.getY() > panel.getHeight()) {
+                    toggleQuickMenu();
+                    return true;
+                }
             }
             return false;
         });
+
+        quickMenuOverlay.addView(panel);
     }
 
-    private void addButtonToPanel(LinearLayout panel, String label, View.OnClickListener listener) {
-        Button btn = new Button(this);
-        btn.setText(label);
-        btn.setTextColor(Color.WHITE);
-        btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-        btn.setAllCaps(false);
-        btn.setTypeface(Typeface.create("sans-serif-medium", Typeface.BOLD));
+    private void addButtonToPanel(LinearLayout panel, String emoji, String label, View.OnClickListener listener) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dpToPx(20), 0, dpToPx(20), 0);
 
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(Color.parseColor("#1C1E24"));
-        bg.setCornerRadius(dpToPx(8));
-        btn.setBackground(bg);
+        LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(52));
+        rowParams.bottomMargin = dpToPx(1);
+        row.setLayoutParams(rowParams);
+        row.setBackgroundColor(Color.parseColor("#1C1D2E"));
 
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(48)
-        );
-        params.bottomMargin = dpToPx(10);
-        btn.setLayoutParams(params);
-        btn.setOnClickListener(listener);
+        TextView iconView = new TextView(this);
+        iconView.setText(emoji);
+        iconView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20);
+        iconView.setPadding(0, 0, dpToPx(16), 0);
+        row.addView(iconView);
 
-        panel.addView(btn);
+        TextView labelView = new TextView(this);
+        labelView.setText(label);
+        labelView.setTextColor(Color.parseColor("#E8E8FF"));
+        labelView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        row.addView(labelView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        row.setOnClickListener(listener);
+        panel.addView(row);
+
+        // Divider
+        View divider = new View(this);
+        divider.setBackgroundColor(Color.parseColor("#252538"));
+        panel.addView(divider, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1));
     }
 
     private void toggleQuickMenu() {
         if (isMenuOpen) {
-            quickMenuOverlay.setVisibility(View.GONE);
+            if (quickMenuOverlay != null) {
+                android.view.animation.TranslateAnimation animate = new android.view.animation.TranslateAnimation(
+                        0, 0, 0, -quickMenuOverlay.getHeight());
+                animate.setDuration(300);
+                animate.setAnimationListener(new android.view.animation.Animation.AnimationListener() {
+                    @Override public void onAnimationStart(android.view.animation.Animation animation) {}
+                    @Override public void onAnimationRepeat(android.view.animation.Animation animation) {}
+                    @Override public void onAnimationEnd(android.view.animation.Animation animation) {
+                        quickMenuOverlay.setVisibility(View.GONE);
+                    }
+                });
+                quickMenuOverlay.startAnimation(animate);
+            }
             isMenuOpen = false;
         } else {
-            quickMenuOverlay.setVisibility(View.VISIBLE);
+            if (quickMenuOverlay != null) {
+                quickMenuOverlay.setVisibility(View.VISIBLE);
+                android.view.animation.TranslateAnimation animate = new android.view.animation.TranslateAnimation(
+                        0, 0, -500, 0);
+                animate.setDuration(300);
+                quickMenuOverlay.startAnimation(animate);
+            }
             isMenuOpen = true;
         }
     }
@@ -1125,8 +1252,12 @@ public class EmulatorActivity extends AppCompatActivity {
         Log.i(TAG, "initCoreAndLoad: Core initialized successfully. Loading game: " + gamePath);
         FileLogger.log("Java: Loading game: " + gamePath);
         boolean loaded = false;
-        if (gamePath.toLowerCase().endsWith(".iso") || gamePath.toLowerCase().endsWith(".mds") || gamePath.toLowerCase().endsWith(".cue") || gamePath.toLowerCase().endsWith(".chd")) {
+        String lowerGamePath = gamePath.toLowerCase();
+        if (lowerGamePath.endsWith(".iso") || lowerGamePath.endsWith(".mds") ||
+            lowerGamePath.endsWith(".cue") || lowerGamePath.endsWith(".chd")) {
             loaded = EmulatorCore.nativeLoadDisc(gamePath);
+        } else if (lowerGamePath.endsWith(".d77") || lowerGamePath.endsWith(".img")) {
+            loaded = EmulatorCore.nativeLoadDisc(gamePath); // Bridge handles floppy
         } else {
             loaded = EmulatorCore.nativeLoadROM(gamePath);
             if (!loaded) {
@@ -1209,11 +1340,10 @@ public class EmulatorActivity extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        boolean previouslyRunning = isRunning;
-        stopEmuThread();
+        stopEmuThread(); // Stop BEFORE destroying views
         updateLayoutForOrientation(newConfig.orientation);
-        if (previouslyRunning && isCoreInitialized) {
-            startEmuThread();
+        if (isCoreInitialized) {
+            startEmuThread(); // Restart AFTER layout is rebuilt
         }
     }
 
@@ -1224,9 +1354,13 @@ public class EmulatorActivity extends AppCompatActivity {
         EmulatorCore.nativeShutdown();
         surfaceView = null;
         gpuView = null;
+        if (audioBridge != null) {
+            audioBridge.stop();
+            audioBridge = null;
+        }
     }
 
-    private int dpToPx(int dp) {
+    private int dpToPx(float dp) {
         return (int) TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, dp, getResources().getDisplayMetrics()
         );

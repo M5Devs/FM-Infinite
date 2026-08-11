@@ -96,6 +96,7 @@ public class EmulatorGLSurfaceView extends GLSurfaceView {
         private int texWidth = 640;
         private int texHeight = 480;
         private boolean textureUpdated = false;
+        private ByteBuffer pixelBuffer;
 
         private boolean screenFilterBilinear = false;
         private boolean filterChanged = true;
@@ -270,10 +271,25 @@ public class EmulatorGLSurfaceView extends GLSurfaceView {
                     }
 
                     if (textureUpdated) {
+                        // Fix 1: Force alpha = 255
+                        for (int i = 0; i < texWidth * texHeight; i++) {
+                            localPixels[i] |= 0xFF000000;
+                        }
+                        // Fix 2+3: Reuse ByteBuffer with correct byte order
+                        int needed = texWidth * texHeight * 4;
+                        if (pixelBuffer == null || pixelBuffer.capacity() < needed) {
+                            pixelBuffer = ByteBuffer.allocateDirect(needed);
+                            pixelBuffer.order(ByteOrder.nativeOrder());
+                        }
+                        pixelBuffer.rewind();
+                        pixelBuffer.asIntBuffer().put(localPixels, 0, texWidth * texHeight);
+                        pixelBuffer.position(0);
+
                         GLES20.glTexImage2D(
                             GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
-                            texWidth, texHeight, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE,
-                            IntBuffer.wrap(localPixels)
+                            texWidth, texHeight, 0,
+                            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE,
+                            pixelBuffer
                         );
                         textureUpdated = false;
                     }

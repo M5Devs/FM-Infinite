@@ -56,7 +56,8 @@ public class EmulatorSurfaceView extends SurfaceView implements SurfaceHolder.Ca
     }
 
     public void drawFrame() {
-        if (holder == null) return;
+        SurfaceHolder h = holder; // Local snapshot — thread-safe read
+        if (h == null) return;
 
         // Fetch latest framebuffer from core
         boolean hasFrame = EmulatorCore.nativeGetFrameBuffer(pixels, size);
@@ -76,7 +77,7 @@ public class EmulatorSurfaceView extends SurfaceView implements SurfaceHolder.Ca
 
         reusableBitmap.setPixels(pixels, 0, width, 0, 0, width, height);
 
-        Canvas canvas = holder.lockCanvas();
+        Canvas canvas = h.lockCanvas(); // Use local h, not this.holder
         if (canvas != null) {
             try {
                 // Clear background
@@ -101,7 +102,7 @@ public class EmulatorSurfaceView extends SurfaceView implements SurfaceHolder.Ca
                 paint.setFilterBitmap(screenFilterBilinear);
                 canvas.drawBitmap(reusableBitmap, null, destRect, paint);
             } finally {
-                holder.unlockCanvasAndPost(canvas);
+                h.unlockCanvasAndPost(canvas);
             }
         }
     }
