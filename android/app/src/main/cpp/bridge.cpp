@@ -1,5 +1,5 @@
 /* LICENSE>>
-Copyright 2025 M5_Development (FM Infinite Authors)
+Copyright 2025 M5 Dev (FM Infinite Authors)
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -657,7 +657,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeGetFrameBuffer(JNIEnv *env, jobject
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(outPixels, pixels_ptr, 0);
@@ -691,7 +691,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_getFrameBuffer(JNIEnv *env, jclass clazz)
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(result, pixels_ptr, 0);
@@ -722,7 +722,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_updateFrameSoftware(JNIEnv* env, jclass c
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(pixelArray, pixels_ptr, 0);
