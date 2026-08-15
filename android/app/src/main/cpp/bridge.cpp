@@ -1,5 +1,5 @@
 /* LICENSE>>
-Copyright 2025 M5 Dev (FM Infinite Authors)
+Copyright 2025 M5_Development (FM Infinite Authors)
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
 
@@ -484,8 +484,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
         return JNI_FALSE;
     }
 
-    write_to_log("C++: CPU reset / PowerOn");
-    g_towns->PowerOn();
+    // PowerOn is called AFTER disc/ROM is loaded in nativeLoadDisc/nativeLoadROM
     g_window->ClearVMClosedFlag();
     LOGI("Emulator core initialized successfully");
     return JNI_TRUE;
@@ -549,11 +548,17 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadDisc(JNIEnv *env, jobject thiz,
             LOGE("Failed to open CD image: %s", DiscImage::ErrorCodeToText(errCode));
             return JNI_FALSE;
         }
+        write_to_log("C++: CD-ROM loaded OK. Resetting CPU to boot from disc.");
+        g_towns->PowerOn();
+        write_to_log("C++: PowerOn complete.");
     } else {
         // Assume floppy disk
         LOGI("Mounting Floppy Disk Image: %s", path_str.c_str());
         g_towns->fdc.LoadD77orRDDorRAW(0, path_str.c_str(), g_towns->state.townsTime);
         g_towns->fdc.CancelDiskChanged(0);
+        write_to_log("C++: Floppy loaded. Resetting CPU.");
+        g_towns->PowerOn();
+        write_to_log("C++: PowerOn complete.");
     }
 
     return JNI_TRUE;
