@@ -1643,6 +1643,7 @@ void Outside_World::WindowInterface::BaseInterval(void)
 	if(true==shared.needRender)
 	{
 		shared.renderer.BuildImage(shared.VRAMCopy,shared.paletteCopy,shared.chaseHQPaletteCopy);
+		shared.renderer.MakeOpaque();
 		shared.needRender=false;
 		auto imageNeedsFlipCopy=shared.imageNeedsFlip;
 		newImageLock.unlock();
