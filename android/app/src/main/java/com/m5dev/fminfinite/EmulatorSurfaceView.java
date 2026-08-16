@@ -16,332 +16,109 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 package com.m5dev.fminfinite;
 
 import android.content.Context;
-import android.opengl.GLES20;
-import android.opengl.GLSurfaceView;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import android.util.AttributeSet;
-import android.util.Log;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 
-import javax.microedition.khronos.egl.EGLConfig;
-import javax.microedition.khronos.opengles.GL10;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
-
-public class EmulatorGLSurfaceView extends GLSurfaceView {
-    private static final String TAG = "EmulatorGLSurfaceView";
-
-    private EmulatorRenderer renderer;
+public class EmulatorSurfaceView extends SurfaceView implements SurfaceHolder.Callback {
+    private SurfaceHolder holder;
     private int[] pixels = new int[640 * 480];
     private int[] size = new int[2];
-    private OnRendererFailedListener failedListener;
+    private Bitmap reusableBitmap = null;
+    private boolean screenFilterBilinear = false;
 
-    public interface OnRendererFailedListener {
-        void onRendererFailed(String reason);
+    public void setScreenFilterBilinear(boolean bilinear) {
+        this.screenFilterBilinear = bilinear;
     }
 
-    public void setOnRendererFailedListener(OnRendererFailedListener listener) {
-        this.failedListener = listener;
-    }
-
-    public EmulatorGLSurfaceView(Context context) {
+    public EmulatorSurfaceView(Context context) {
         super(context);
         init();
     }
 
-    public EmulatorGLSurfaceView(Context context, AttributeSet attrs) {
+    public EmulatorSurfaceView(Context context, AttributeSet attrs) {
         super(context, attrs);
         init();
     }
 
+    public EmulatorSurfaceView(Context context, AttributeSet attrs, int defStyleAttr) {
+        super(context, attrs, defStyleAttr);
+        init();
+    }
+
     private void init() {
-        setEGLContextClientVersion(2); // OpenGL ES 2.0
-        renderer = new EmulatorRenderer();
-        setRenderer(renderer);
-        setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+        holder = getHolder();
+        holder.addCallback(this);
     }
 
     public void drawFrame() {
+        SurfaceHolder h = holder; // Local snapshot — thread-safe read
+        if (h == null) return;
+
         // Fetch latest framebuffer from core
         boolean hasFrame = EmulatorCore.nativeGetFrameBuffer(pixels, size);
-        if (!hasFrame) {
-            // No frame yet (BIOS booting) — keep requesting render so GL thread stays alive
-            requestRender();
-            return;
-        }
+        if (!hasFrame) return;
 
         int width = size[0];
         int height = size[1];
-        if (width <= 0 || height <= 0) {
-            requestRender();
-            return;
+        if (width <= 0 || height <= 0) return;
+
+        // Recreate reusable bitmap if size changed
+        if (reusableBitmap == null || reusableBitmap.getWidth() != width || reusableBitmap.getHeight() != height) {
+            reusableBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            if (pixels.length < width * height) {
+                pixels = new int[width * height];
+            }
         }
 
-        if (pixels.length < width * height) {
-            pixels = new int[width * height];
-        }
+        reusableBitmap.setPixels(pixels, 0, width, 0, 0, width, height);
 
-        updateFrame(pixels, width, height);
+        Canvas canvas = h.lockCanvas(); // Use local h, not this.holder
+        if (canvas != null) {
+            try {
+                // Clear background
+                canvas.drawColor(0xFF000000);
+
+                // Draw scaled to fit the view, maintaining aspect ratio
+                int viewWidth = getWidth();
+                int viewHeight = getHeight();
+
+                float scaleX = (float) viewWidth / width;
+                float scaleY = (float) viewHeight / height;
+                float scale = Math.min(scaleX, scaleY);
+
+                int scaledWidth = Math.round(width * scale);
+                int scaledHeight = Math.round(height * scale);
+
+                int left = (viewWidth - scaledWidth) / 2;
+                int top = (viewHeight - scaledHeight) / 2;
+
+                Rect destRect = new Rect(left, top, left + scaledWidth, top + scaledHeight);
+                Paint paint = new Paint();
+                paint.setFilterBitmap(screenFilterBilinear);
+                canvas.drawBitmap(reusableBitmap, null, destRect, paint);
+            } finally {
+                h.unlockCanvasAndPost(canvas);
+            }
+        }
     }
 
-    public void updateFrame(int[] newPixels, int width, int height) {
-        renderer.updateTexture(newPixels, width, height);
-        requestRender();
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {
+        this.holder = holder;
     }
 
-    public void setScreenFilterBilinear(boolean bilinear) {
-        if (renderer != null) {
-            renderer.setScreenFilterBilinear(bilinear);
-            requestRender();
-        }
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        this.holder = holder;
     }
 
-    private class EmulatorRenderer implements GLSurfaceView.Renderer {
-        private int textureId;
-        private int program;
-        private int[] localPixels;
-        private int texWidth = 640;
-        private int texHeight = 480;
-        private boolean textureUpdated = false;
-        private ByteBuffer pixelBuffer;
-
-        private boolean screenFilterBilinear = false;
-        private boolean filterChanged = true;
-
-        private final FloatBuffer vertexBuffer;
-        private final FloatBuffer texCoordBuffer;
-
-        private final float[] vertices = {
-            -1.0f, -1.0f, 0.0f,  // Bottom left
-             1.0f, -1.0f, 0.0f,  // Bottom right
-            -1.0f,  1.0f, 0.0f,  // Top left
-             1.0f,  1.0f, 0.0f   // Top right
-        };
-
-        private final float[] texCoords = {
-            0.0f, 1.0f,  // Bottom left
-            1.0f, 1.0f,  // Bottom right
-            0.0f, 0.0f,  // Top left
-            1.0f, 0.0f   // Top right
-        };
-
-        private final String vertexShaderCode =
-            "attribute vec4 vPosition;" +
-            "attribute vec2 vTexCoord;" +
-            "varying vec2 texCoord;" +
-            "void main() {" +
-            "  gl_Position = vPosition;" +
-            "  texCoord = vTexCoord;" +
-            "}";
-
-        private final String fragmentShaderCode =
-            "precision mediump float;" +
-            "uniform sampler2D texture;" +
-            "varying vec2 texCoord;" +
-            "void main() {" +
-            "  gl_FragColor = texture2D(texture, texCoord);" +
-            "}";
-
-        public EmulatorRenderer() {
-            ByteBuffer vbb = ByteBuffer.allocateDirect(vertices.length * 4);
-            vbb.order(ByteOrder.nativeOrder());
-            vertexBuffer = vbb.asFloatBuffer();
-            vertexBuffer.put(vertices);
-            vertexBuffer.position(0);
-
-            ByteBuffer tbb = ByteBuffer.allocateDirect(texCoords.length * 4);
-            tbb.order(ByteOrder.nativeOrder());
-            texCoordBuffer = tbb.asFloatBuffer();
-            texCoordBuffer.put(texCoords);
-            texCoordBuffer.position(0);
-        }
-
-        public synchronized void updateTexture(int[] newPixels, int width, int height) {
-            if (localPixels == null || localPixels.length < width * height) {
-                localPixels = new int[width * height];
-            }
-            System.arraycopy(newPixels, 0, localPixels, 0, width * height);
-            texWidth = width;
-            texHeight = height;
-            textureUpdated = true;
-        }
-
-        public synchronized void setScreenFilterBilinear(boolean bilinear) {
-            if (this.screenFilterBilinear != bilinear) {
-                this.screenFilterBilinear = bilinear;
-                this.filterChanged = true;
-            }
-        }
-
-        private void reportError(final String msg) {
-            Log.e(TAG, "Renderer Error: " + msg);
-            FileLogger.log("Renderer Error: " + msg);
-            post(() -> {
-                if (failedListener != null) {
-                    failedListener.onRendererFailed(msg);
-                }
-            });
-        }
-
-        @Override
-        public void onSurfaceCreated(GL10 gl, EGLConfig config) {
-            GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-
-            // Compile shaders
-            int vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderCode);
-            int fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderCode);
-
-            if (vertexShader == 0 || fragmentShader == 0) {
-                reportError("Shader compilation failed.");
-                return;
-            }
-
-            program = GLES20.glCreateProgram();
-            if (program == 0) {
-                reportError("Failed to create GLES program.");
-                return;
-            }
-
-            GLES20.glAttachShader(program, vertexShader);
-            GLES20.glAttachShader(program, fragmentShader);
-            GLES20.glLinkProgram(program);
-
-            int[] linkStatus = new int[1];
-            GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linkStatus, 0);
-            if (linkStatus[0] == 0) {
-                String log = GLES20.glGetProgramInfoLog(program);
-                reportError("Program linking failed: " + log);
-                GLES20.glDeleteProgram(program);
-                program = 0;
-                return;
-            }
-
-            // Create texture
-            int[] textures = new int[1];
-            GLES20.glGenTextures(1, textures, 0);
-            textureId = textures[0];
-
-            if (textureId == 0) {
-                reportError("Failed to generate texture ID.");
-                return;
-            }
-
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
-            int initialFilter = screenFilterBilinear ? GLES20.GL_LINEAR : GLES20.GL_NEAREST;
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, initialFilter);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, initialFilter);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-        }
-
-        @Override
-        public void onSurfaceChanged(GL10 gl, int width, int height) {
-            // Maintain 4:3 aspect ratio
-            float targetAspectRatio = 4.0f / 3.0f;
-            float aspect = (float) width / height;
-            int viewportX, viewportY, viewportWidth, viewportHeight;
-            if (aspect > targetAspectRatio) {
-                viewportHeight = height;
-                viewportWidth = Math.round(height * targetAspectRatio);
-                viewportX = (width - viewportWidth) / 2;
-                viewportY = 0;
-            } else {
-                viewportWidth = width;
-                viewportHeight = Math.round(width / targetAspectRatio);
-                viewportX = 0;
-                viewportY = (height - viewportHeight) / 2;
-            }
-            GLES20.glViewport(viewportX, viewportY, viewportWidth, viewportHeight);
-        }
-
-        @Override
-        public void onDrawFrame(GL10 gl) {
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            if (program == 0) {
-                return;
-            }
-
-            synchronized (this) {
-                if (localPixels == null) {
-                    return;
-                }
-
-                if (textureUpdated || filterChanged) {
-                    GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
-
-                    if (filterChanged) {
-                        int filter = screenFilterBilinear ? GLES20.GL_LINEAR : GLES20.GL_NEAREST;
-                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, filter);
-                        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, filter);
-                        filterChanged = false;
-                    }
-
-                    if (textureUpdated) {
-                        // Fix 1: Force alpha = 255
-                        for (int i = 0; i < texWidth * texHeight; i++) {
-                            localPixels[i] |= 0xFF000000;
-                        }
-                        // Fix 2+3: Reuse ByteBuffer with correct byte order
-                        int needed = texWidth * texHeight * 4;
-                        if (pixelBuffer == null || pixelBuffer.capacity() < needed) {
-                            pixelBuffer = ByteBuffer.allocateDirect(needed);
-                            pixelBuffer.order(ByteOrder.nativeOrder());
-                        }
-                        pixelBuffer.rewind();
-                        pixelBuffer.asIntBuffer().put(localPixels, 0, texWidth * texHeight);
-                        pixelBuffer.position(0);
-
-                        GLES20.glTexImage2D(
-                            GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
-                            texWidth, texHeight, 0,
-                            GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE,
-                            pixelBuffer
-                        );
-                        textureUpdated = false;
-                    }
-                }
-            }
-
-            GLES20.glUseProgram(program);
-
-            int positionHandle = GLES20.glGetAttribLocation(program, "vPosition");
-            int texCoordHandle = GLES20.glGetAttribLocation(program, "vTexCoord");
-            int textureHandle = GLES20.glGetUniformLocation(program, "texture");
-
-            GLES20.glEnableVertexAttribArray(positionHandle);
-            GLES20.glVertexAttribPointer(positionHandle, 3, GLES20.GL_FLOAT, false, 12, vertexBuffer);
-
-            GLES20.glEnableVertexAttribArray(texCoordHandle);
-            GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 8, texCoordBuffer);
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId);
-            GLES20.glUniform1i(textureHandle, 0);
-
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-            GLES20.glDisableVertexAttribArray(positionHandle);
-            GLES20.glDisableVertexAttribArray(texCoordHandle);
-        }
-
-        private int loadShader(int type, String shaderCode) {
-            int shader = GLES20.glCreateShader(type);
-            if (shader == 0) {
-                return 0;
-            }
-            GLES20.glShaderSource(shader, shaderCode);
-            GLES20.glCompileShader(shader);
-
-            int[] compileStatus = new int[1];
-            GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, compileStatus, 0);
-            if (compileStatus[0] == 0) {
-                String log = GLES20.glGetShaderInfoLog(shader);
-                reportError("Shader type " + type + " compile failed: " + log);
-                GLES20.glDeleteShader(shader);
-                return 0;
-            }
-            return shader;
-        }
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        this.holder = null;
     }
 }
