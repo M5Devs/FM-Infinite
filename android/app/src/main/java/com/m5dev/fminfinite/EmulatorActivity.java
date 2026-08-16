@@ -1254,7 +1254,8 @@ public class EmulatorActivity extends AppCompatActivity {
         boolean loaded = false;
         String lowerGamePath = gamePath.toLowerCase();
         if (lowerGamePath.endsWith(".iso") || lowerGamePath.endsWith(".mds") ||
-            lowerGamePath.endsWith(".cue") || lowerGamePath.endsWith(".chd")) {
+            lowerGamePath.endsWith(".cue") || lowerGamePath.endsWith(".chd") ||
+            lowerGamePath.endsWith(".ccd")) {
             loaded = EmulatorCore.nativeLoadDisc(gamePath);
         } else if (lowerGamePath.endsWith(".d77") || lowerGamePath.endsWith(".img")) {
             loaded = EmulatorCore.nativeLoadDisc(gamePath); // Bridge handles floppy
