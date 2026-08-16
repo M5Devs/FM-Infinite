@@ -64,11 +64,18 @@ public class EmulatorGLSurfaceView extends GLSurfaceView {
     public void drawFrame() {
         // Fetch latest framebuffer from core
         boolean hasFrame = EmulatorCore.nativeGetFrameBuffer(pixels, size);
-        if (!hasFrame) return;
+        if (!hasFrame) {
+            // No frame yet (BIOS booting) — keep requesting render so GL thread stays alive
+            requestRender();
+            return;
+        }
 
         int width = size[0];
         int height = size[1];
-        if (width <= 0 || height <= 0) return;
+        if (width <= 0 || height <= 0) {
+            requestRender();
+            return;
+        }
 
         if (pixels.length < width * height) {
             pixels = new int[width * height];
