@@ -36,6 +36,9 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
+// Forward declaration
+void write_to_log(const char *format, ...);
+
 // Custom Window Interface for Android
 class AndroidWindowInterface : public Outside_World::WindowInterface
 {
