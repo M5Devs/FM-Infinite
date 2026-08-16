@@ -57,6 +57,16 @@ public:
     void UpdateImage(TownsRender::ImageCopy &img) override
     {
         std::lock_guard<std::mutex> lock(imageMutex);
+        static int frameCount = 0;
+        frameCount++;
+        if (frameCount == 1) {
+            write_to_log("C++: First frame received from core! size=%dx%d alpha_sample=%u",
+                img.wid, img.hei,
+                img.rgba.empty() ? 0 : (unsigned char)img.rgba[3]);
+        }
+        if (frameCount % 300 == 0) {
+            write_to_log("C++: Frame #%d received. size=%dx%d", frameCount, img.wid, img.hei);
+        }
         latestImage = img;
     }
     
@@ -484,7 +494,8 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
         return JNI_FALSE;
     }
 
-    // PowerOn is called AFTER disc/ROM is loaded in nativeLoadDisc/nativeLoadROM
+    write_to_log("C++: CPU reset / PowerOn");
+    g_towns->PowerOn();
     g_window->ClearVMClosedFlag();
     LOGI("Emulator core initialized successfully");
     return JNI_TRUE;
@@ -548,17 +559,11 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadDisc(JNIEnv *env, jobject thiz,
             LOGE("Failed to open CD image: %s", DiscImage::ErrorCodeToText(errCode));
             return JNI_FALSE;
         }
-        write_to_log("C++: CD-ROM loaded OK. Resetting CPU to boot from disc.");
-        g_towns->PowerOn();
-        write_to_log("C++: PowerOn complete.");
     } else {
         // Assume floppy disk
         LOGI("Mounting Floppy Disk Image: %s", path_str.c_str());
         g_towns->fdc.LoadD77orRDDorRAW(0, path_str.c_str(), g_towns->state.townsTime);
         g_towns->fdc.CancelDiskChanged(0);
-        write_to_log("C++: Floppy loaded. Resetting CPU.");
-        g_towns->PowerOn();
-        write_to_log("C++: PowerOn complete.");
     }
 
     return JNI_TRUE;
@@ -570,6 +575,15 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeRunFrame(JNIEnv *env, jobject thiz)
     std::lock_guard<std::mutex> lock(g_vm_mutex);
     if (g_towns == nullptr) {
         return;
+    }
+
+    static int runFrameCount = 0;
+    runFrameCount++;
+    if (runFrameCount == 1) {
+        write_to_log("C++: nativeRunFrame called for FIRST TIME — emulation starting!");
+    }
+    if (runFrameCount % 600 == 0) {
+        write_to_log("C++: nativeRunFrame call #%d — emulator running", runFrameCount);
     }
 
     // Run for roughly 1/60th of a second worth of Towns time (16666667 nanoseconds)
@@ -637,7 +651,19 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeGetFrameBuffer(JNIEnv *env, jobject
 
     TownsRender::ImageCopy img = g_window->GetLatestImage();
     if (img.wid == 0 || img.hei == 0 || img.rgba.empty()) {
+        static int emptyCount = 0;
+        emptyCount++;
+        if (emptyCount == 1 || emptyCount % 600 == 0) {
+            write_to_log("C++: nativeGetFrameBuffer: no frame yet (call #%d) wid=%d hei=%d empty=%d",
+                emptyCount, img.wid, img.hei, (int)img.rgba.empty());
+        }
         return JNI_FALSE;
+    }
+
+    static int fetchCount = 0;
+    fetchCount++;
+    if (fetchCount == 1) {
+        write_to_log("C++: nativeGetFrameBuffer: FIRST frame sent to Java! size=%dx%d", img.wid, img.hei);
     }
 
     // Set output size
@@ -662,7 +688,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeGetFrameBuffer(JNIEnv *env, jobject
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(outPixels, pixels_ptr, 0);
@@ -696,7 +722,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_getFrameBuffer(JNIEnv *env, jclass clazz)
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(result, pixels_ptr, 0);
@@ -727,7 +753,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_updateFrameSoftware(JNIEnv* env, jclass c
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(pixelArray, pixels_ptr, 0);
