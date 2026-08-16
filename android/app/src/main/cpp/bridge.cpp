@@ -497,8 +497,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeInit(JNIEnv *env, jobject thiz, jst
         return JNI_FALSE;
     }
 
-    write_to_log("C++: CPU reset / PowerOn");
-    g_towns->PowerOn();
+    // PowerOn called AFTER disc/ROM is loaded
     g_window->ClearVMClosedFlag();
     LOGI("Emulator core initialized successfully");
     return JNI_TRUE;
@@ -560,13 +559,20 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadDisc(JNIEnv *env, jobject thiz,
         auto errCode = g_towns->cdrom.state.GetDisc().Open(path_str);
         if (DiscImage::ERROR_NOERROR != errCode) {
             LOGE("Failed to open CD image: %s", DiscImage::ErrorCodeToText(errCode));
+            write_to_log("C++: CD-ROM open FAILED: %s", DiscImage::ErrorCodeToText(errCode));
             return JNI_FALSE;
         }
+        write_to_log("C++: CD-ROM loaded OK. Calling PowerOn to boot from disc.");
+        g_towns->PowerOn();
+        write_to_log("C++: PowerOn complete after CD load.");
     } else {
         // Assume floppy disk
         LOGI("Mounting Floppy Disk Image: %s", path_str.c_str());
         g_towns->fdc.LoadD77orRDDorRAW(0, path_str.c_str(), g_towns->state.townsTime);
         g_towns->fdc.CancelDiskChanged(0);
+        write_to_log("C++: Floppy loaded. Calling PowerOn.");
+        g_towns->PowerOn();
+        write_to_log("C++: PowerOn complete after floppy load.");
     }
 
     return JNI_TRUE;
@@ -624,13 +630,20 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeRunFrame(JNIEnv *env, jobject thiz)
             g_towns->state.nextDevicePollingTime = g_towns->state.townsTime + FMTownsCommon::DEVICE_POLLING_INTERVAL;
         }
 
-        // Trigger rendering check
+        // Trigger rendering — build directly to avoid try_lock race in SendNewImage
         if (g_towns->state.nextRenderingTime <= g_towns->state.townsTime) {
             g_towns->state.nextRenderingTime += FMTownsCommon::DEVICE_POLLING_INTERVAL;
-            g_window->SendNewImage(*g_towns, g_outside_world->ImageNeedsFlip());
+            g_towns->RenderQuiet(g_window->shared.renderer, true, true);
+            g_window->shared.renderer.MakeOpaque();
+            TownsRender::ImageCopy img = g_window->shared.renderer.MoveImage();
+            g_window->UpdateImage(img);
+            static int imgCount = 0;
+            imgCount++;
+            if (imgCount == 1) {
+                write_to_log("C++: First image built and sent directly! size=%dx%d", img.wid, img.hei);
+            }
         }
     }
-
     g_window->Interval();
 }
 
@@ -691,7 +704,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeGetFrameBuffer(JNIEnv *env, jobject
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(outPixels, pixels_ptr, 0);
@@ -725,7 +738,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_getFrameBuffer(JNIEnv *env, jclass clazz)
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(result, pixels_ptr, 0);
@@ -756,7 +769,7 @@ Java_com_m5dev_fminfinite_EmulatorCore_updateFrameSoftware(JNIEnv* env, jclass c
         uint32_t g = (rgba_pixel >> 8) & 0xFF;
         uint32_t b = (rgba_pixel >> 16) & 0xFF;
         uint32_t a = (rgba_pixel >> 24) & 0xFF;
-        pixels_ptr[i] = (a << 24) | (r << 16) | (g << 8) | b;
+        pixels_ptr[i] = (0xFF << 24) | (r << 16) | (g << 8) | b;
     }
 
     env->ReleaseIntArrayElements(pixelArray, pixels_ptr, 0);
