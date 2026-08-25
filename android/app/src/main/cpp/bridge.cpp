@@ -562,9 +562,8 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadDisc(JNIEnv *env, jobject thiz,
             write_to_log("C++: CD-ROM open FAILED: %s", DiscImage::ErrorCodeToText(errCode));
             return JNI_FALSE;
         }
-        write_to_log("C++: CD-ROM loaded OK. Calling PowerOn to boot from disc.");
+        write_to_log("C++: CD-ROM loaded OK. Calling PowerOn.");
         g_towns->PowerOn();
-        write_to_log("C++: PowerOn complete after CD load.");
     } else {
         // Assume floppy disk
         LOGI("Mounting Floppy Disk Image: %s", path_str.c_str());
@@ -572,7 +571,6 @@ Java_com_m5dev_fminfinite_EmulatorCore_nativeLoadDisc(JNIEnv *env, jobject thiz,
         g_towns->fdc.CancelDiskChanged(0);
         write_to_log("C++: Floppy loaded. Calling PowerOn.");
         g_towns->PowerOn();
-        write_to_log("C++: PowerOn complete after floppy load.");
     }
 
     return JNI_TRUE;
